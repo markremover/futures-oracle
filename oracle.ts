@@ -361,6 +361,19 @@ function startServer() {
                         return;
                     }
 
+                    // --- BYPASS AI FOR TESTS ---
+                    if (data.source && data.source.includes("TEST")) {
+                        console.log(`[TEST MODE] Bypassing AI for ${data.pair}. Returning 100% Confidence.`);
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            signal: "BUY",
+                            confidence: 100,
+                            reasoning: "TEST SIGNAL (AI BYPASSED)",
+                            macro_impact: "TEST MODE"
+                        }));
+                        return;
+                    }
+
                     console.log(`[AI] Analyzing Market Data for ${data.pair || 'Crypto'}...`);
 
                     const prompt = `
