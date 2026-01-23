@@ -541,6 +541,35 @@ function connectWs() {
     ws.on('error', (e) => console.error(e));
 }
 
+// --- SELF-DIAGNOSTIC (STARTUP CHECK) ---
+function runStartupCheck() {
+    console.log("⏳ [SYSTEM] Waiting 10s for warm-up...");
+    setTimeout(async () => {
+        const isHealthy = wsConnected && prices.size > 0;
+        const tracked = Array.from(prices.keys()).length;
+
+        console.log(`🔍 [DIAGNOSTIC] Connected: ${wsConnected}, Pairs: ${tracked}, Finnhub: Ready`);
+
+        if (isHealthy) {
+            const url = `${N8N_WEBHOOK_BASE}system`; // e.g. futurec-trigger-system
+            try {
+                await axios.post(url, {
+                    type: "SYSTEM_STARTUP",
+                    status: "ACTIVE",
+                    message: `🟢 Futures Oracle Online. Tracking ${tracked} pairs. Finnhub Ready.`,
+                    timestamp: Date.now()
+                });
+                console.log(`✅ [REPORT] Startup Green Light sent to N8N!`);
+            } catch (e: any) {
+                console.error(`⚠️ [REPORT FAILED] Could not contact N8N: ${e.message}`);
+            }
+        } else {
+            console.error(`🔴 [DIAGNOSTIC FAILED] Oracle is NOT healthy after 10s.`);
+        }
+    }, 10000); // 10 seconds
+}
+
 // --- MAIN ---
 startServer();
 connectWs();
+runStartupCheck();
