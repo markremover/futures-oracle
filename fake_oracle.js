@@ -18,11 +18,24 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
 
         if (req.url.includes('/candles')) {
-            // Fake Candles (Uptrend)
+            // Fake Candles (Uptrend) -> UNIX TIMESTAMPS (Seconds)
             const candles = [];
             let price = 2500;
-            for (let i = 0; i < 50; i++) { price += 2; candles.push({ c: price, h: price + 1, l: price - 1, o: price, t: Date.now() - (50 - i) * 60000 }); }
+            const nowSeconds = Math.floor(Date.now() / 1000); // FIX: Send Seconds, not ms
+
+            for (let i = 0; i < 60; i++) {
+                price += 2;
+                candles.push({
+                    c: price,
+                    h: price + 1,
+                    l: price - 1,
+                    o: price,
+                    t: nowSeconds - (60 - i) * 60, // 1 minute intervals in seconds
+                    v: 1000
+                });
+            }
             res.end(JSON.stringify(candles));
+            console.log("   [SERVER] 🕯️ Sent Fake Candles (Seconds Timestamp)");
             return;
         }
         if (req.url.includes('/price')) {
@@ -47,10 +60,7 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.log(`\n✅ TEST SERVER STARTED (Port ${PORT})`);
     console.log(`🚀 STARTING AUTO-TEST IN 3 SECONDS...`);
 
-    // Wait for server to settle
     await new Promise(r => setTimeout(r, 3000));
-
-    // --- 2. THE TRIGGER (GUN) ---
     await fireAll();
 
     console.log("\n🏁 TEST COMPLETE. Closing Server...");
@@ -65,27 +75,23 @@ async function fireAll() {
     for (const target of TARGETS) {
         process.stdout.write(`🔫 Firing ${target.symbol}... `);
 
-        // FULL PAYLOAD (To prevent N8N invalid JSON error)
         const payload = JSON.stringify({
             symbol: target.symbol,
-            pair: target.symbol,          // N8N often uses 'pair'
+            pair: target.symbol,
             price: 2500.00,
-
-            // RICH DATA (Prevents empty fields breaking JSON construction)
             trend: "STRONG_UPTREND",
             rsi: 30,
             technical_status: "GOLDEN_CROSS",
             fng_value: 50,
             fng_label: "Neutral",
             news_sentiment: "Positive",
-
             sentiment: "TEST_MODE",
-            source: "ONE_TERMINAL_TEST_V2"
+            source: "ONE_TERMINAL_TEST_V3"
         });
 
         const options = {
             hostname: '172.17.0.1',
-            port: 5678, // N8N Webhook Port
+            port: 5678,
             path: `/webhook/${target.path}`,
             method: 'POST',
             headers: {
