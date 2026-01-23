@@ -1,0 +1,13 @@
+version: '3'
+services:
+  oracle:
+    build: .
+    image: futures-oracle
+    container_name: futures-oracle
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - FINNHUB_KEY=d5ole3hr01qjast7epj0d5ole3hr01qjast7epjg
+    volumes:
+      - "./oracle.ts:/app/oracle.ts"

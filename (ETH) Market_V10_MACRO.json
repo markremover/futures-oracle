@@ -1,0 +1,429 @@
+{
+  "name": "(ETH) Market_V10_MACRO",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/candles",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "granularity",
+              "value": "3600"
+            },
+            {
+              "name": "limit",
+              "value": "300"
+            },
+            {
+              "name": "pair",
+              "value": "ETH-PERP"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1312,
+        496
+      ],
+      "id": "0e416567-1cca-420d-af93-dcc772d2bb3c",
+      "name": "Historical Candles"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pair",
+              "value": "ETH-PERP"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1472,
+        496
+      ],
+      "id": "4a4a05ca-747a-4830-9d3d-99767fcb6911",
+      "name": "Current_Price",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "futurec-trigger-eth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        496
+      ],
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/fng",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1792,
+        496
+      ],
+      "id": "c55b60ad-c58e-4c2e-bd9c-f9297a9d523d",
+      "name": "F&G Index"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/news",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1984,
+        496
+      ],
+      "id": "873f5305-2d35-4169-b180-dcf923d36c73",
+      "name": "News/Sentiment"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/macro",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2176,
+        496
+      ],
+      "id": "bf63c80b-10e8-40d1-a917-36d12caec5a3",
+      "name": "Macro Calendar"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e62c9875-529b-4f6c-aca6-aff55fd9d7c5",
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 74,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "4d72f026-ed60-434b-ba1d-18367fbc9207",
+              "leftValue": "={{ $json.final_signal }}",
+              "rightValue": "BUY|SELL",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        704
+      ],
+      "id": "1263b096-35d0-4aab-9685-54c757fb5a6a",
+      "name": "Risk Filter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst PERIOD = 14;\nconst ATR_MAX_THRESHOLD = 0.01; \nconst RSI_NEUTRAL_MIN = 48;\nconst RSI_NEUTRAL_MAX = 52;\n\n// --- GET DATA FROM CANDLES ---\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    // Index 0 is the most recent candle in Coinbase API\n    const lastCandle = candleData[0]; \n    current_price = parseFloat(lastCandle[4] || lastCandle['4']);\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\n// --- PARSE CANDLES FOR CALCULATION ---\nconst candles = candleData.map(c => ({\n    close: parseFloat(c[4] || c['4']),\n    high: parseFloat(c[2] || c['2']),\n    low: parseFloat(c[1] || c['1'])\n}));\n\n// --- CALCULATION FUNCTIONS ---\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        496
+      ],
+      "id": "e4e21ac3-74d5-4abe-bac0-cd40aabf4b10",
+      "name": "Code/Function (ATR/RSI Filter)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = items[0].json;\nconst entry = parseFloat(input.current_price || 0);\nconst signal = input.final_signal || \"WAIT\";\n\n// --- SETTINGS (ETH) ---\nconst size = \"0.1\"; // 0.1 ETH\nconst riskAmount = 10;\nconst profitAmount = 20;\n\nconst move = riskAmount / parseFloat(size);\nconst pMove = profitAmount / parseFloat(size);\n\nlet sl = 0;\nlet tp = 0;\n\nif (signal === \"BUY\") {\n    sl = entry - move;\n    tp = entry + pMove;\n} else {\n    sl = entry + move;\n    tp = entry - pMove;\n}\n\nreturn [{\n    json: {\n        ...input,\n        PRODUCT_ID: \"ETH-PERP\",\n        side: signal,\n        confidence: input.confidence_score,\n        position_size: size,\n        entry_price: entry.toFixed(2),\n        sl_price: sl.toFixed(2),\n        tp_price: tp.toFixed(2)\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        688
+      ],
+      "id": "1d5a4133-f515-4ad8-9bd8-ac99839aba4c",
+      "name": "Code/Function (Position Sizing)"
+    },
+    {
+      "parameters": {
+        "jsCode": "/* \n   SIGNAL MODE (MANUAL TRADING) - V2\n   ---------------------------------------------------\n   Goal: Format trade details for Telegram.\n   Improvements: Visual distinction for LONG vs SHORT.\n   ---------------------------------------------------\n*/\n\nconst input = items[0].json || {};\n\n// 1. EXTRACT DATA (Calculated in 'Position Sizing' node)\nconst side = input.side || \"BUY\"; // \"BUY\" or \"SELL\"\nconst entry = parseFloat(input.current_price || 0).toFixed(2);\nconst sl = parseFloat(input.sl_price || 0).toFixed(2);\nconst tp = parseFloat(input.tp_price || 0).toFixed(2);\nconst size = input.position_size; // DYNAMIC FROM PREVIOUS NODE\n\n// 2. DEFINE VISUALS\nlet title = \"\";\nlet body = \"\";\n\nif (side === \"BUY\") {\n    title = \"🟢 ETH LONG (BUY) SIGNAL\";\n    body = `\n    📈 **DIRECTION:** LONG (Green)\n    💰 **Entry Price:** ${entry}\n    \n    🛑 **Stop Loss:** ${sl}\n    ✅ **Take Profit:** ${tp}\n    \n    📦 **Size:** ${size} ETH\n    \n    ⚠️ *Open Coinbase and Buy manually!*\n    `.trim();\n} else {\n    title = \"🔴 ETH SHORT (SELL) SIGNAL\";\n    body = `\n    📉 **DIRECTION:** SHORT (Red)\n    💰 **Entry Price:** ${entry}\n    \n    🛑 **Stop Loss:** ${sl}\n    ✅ **Take Profit:** ${tp}\n    \n    📦 **Size:** ${size} ETH\n    \n    ⚠️ *Open Coinbase and Sell manually!*\n    `.trim();\n}\n\n// 3. OUTPUT FOR TELEGRAM NODE\nreturn [{\n    json: {\n        ...input,\n        success: true, // Pass-through\n        status: \"MANUAL_SIGNAL\",\n        // These fields must match exactly what you use in the Telegram Node expressions:\n        message_title: title,\n        message_body: body,\n        signal_side: side\n    }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        688
+      ],
+      "id": "47a1e14a-5bb4-4eb1-a58c-33b561262167",
+      "name": "Code/Function (SL/TP Jobs)1"
+    },
+    {
+      "parameters": {
+        "chatId": "5687487073",
+        "text": "={{$json.message_title}}  {{$json.message_body}}\n\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{$json.confidence_score}}%",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1952,
+        688
+      ],
+      "id": "15ecc0ac-127b-4a0b-a229-7fd9180bd2e9",
+      "name": "Telegram (Report)",
+      "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
+      "credentials": {
+        "telegramApi": {
+          "id": "ivTcOnSN0qURvGop",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Universal Parser V2\nconst aiResponse = items[0].json;\nconst livePrice = parseFloat($items(\"Code/Function (ATR/RSI Filter)\")[0].json.current_price || 0);\n\n// Ensure confidence score lands in the correct variable\nconst signal = aiResponse.signal || \"WAIT\";\n// Fix: Gemini can send 'confidence' OR 'confidence_score' - handle both\nconst conf = aiResponse.confidence || aiResponse.confidence_score || 0;\n\nreturn {\n    json: {\n        ...aiResponse,\n        final_signal: signal,\n        current_price: livePrice,\n        confidence_score: conf // Use 'conf' so Risk Filter always sees a number\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        704
+      ],
+      "id": "6237a20f-aa68-499a-be18-c60d33db3783",
+      "name": "Parser"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/market-context",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2368,
+        496
+      ],
+      "id": "e7b8c9d0-1a2b-3c4d-5e6f-7g8h9i0j1k2l",
+      "name": "Market Context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/analyze",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyBpUDhfTE6mHe4UtXKaljde-iIeU_8yFjg\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2560,
+        496
+      ],
+      "id": "1ee69ba3-0f53-486a-b341-612410753988",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Historical Candles": {
+      "main": [
+        [
+          {
+            "node": "Current_Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current_Price": {
+      "main": [
+        [
+          {
+            "node": "Code/Function (ATR/RSI Filter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Historical Candles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "F&G Index": {
+      "main": [
+        [
+          {
+            "node": "News/Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News/Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Macro Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Macro Calendar": {
+      "main": [
+        [
+          {
+            "node": "Market Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk Filter": {
+      "main": [
+        [
+          {
+            "node": "Code/Function (Position Sizing)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code/Function (ATR/RSI Filter)": {
+      "main": [
+        [
+          {
+            "node": "F&G Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code/Function (Position Sizing)": {
+      "main": [
+        [
+          {
+            "node": "Code/Function (SL/TP Jobs)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code/Function (SL/TP Jobs)1": {
+      "main": [
+        [
+          {
+            "node": "Telegram (Report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parser": {
+      "main": [
+        [
+          {
+            "node": "Risk Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "9b0fe46b-3d49-404e-8818-a46409427ff5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "339b794e03f1726cac62299fb8b8908a3e18b0ee606aaeaa368b5c0b843b6abc"
+  },
+  "id": "rGceVwnSgv885hop",
+  "tags": []
+}
+
