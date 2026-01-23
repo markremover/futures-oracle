@@ -12,7 +12,6 @@ const TARGETS = [
 
 // --- 1. THE FAKE SERVER (BRAIN) ---
 const server = http.createServer((req, res) => {
-    // console.log(`[SERVER] ${req.method} ${req.url}`); // Silent mode to not clutter
     let body = '';
     req.on('data', chunk => body += chunk.toString());
     req.on('end', () => {
@@ -61,26 +60,32 @@ server.listen(PORT, '0.0.0.0', async () => {
 
 // --- HELPER FUNCTION TO FIRE SIGNALS ---
 async function fireAll() {
-    const http = require('http'); // Native http to avoid axios dependency
+    const http = require('http');
 
     for (const target of TARGETS) {
         process.stdout.write(`🔫 Firing ${target.symbol}... `);
 
+        // FULL PAYLOAD (To prevent N8N invalid JSON error)
         const payload = JSON.stringify({
             symbol: target.symbol,
+            pair: target.symbol,          // N8N often uses 'pair'
             price: 2500.00,
+
+            // RICH DATA (Prevents empty fields breaking JSON construction)
+            trend: "STRONG_UPTREND",
+            rsi: 30,
+            technical_status: "GOLDEN_CROSS",
+            fng_value: 50,
+            fng_label: "Neutral",
+            news_sentiment: "Positive",
+
             sentiment: "TEST_MODE",
-            source: "ONE_TERMINAL_TEST"
+            source: "ONE_TERMINAL_TEST_V2"
         });
 
         const options = {
-            hostname: '172.17.0.1', // Docker Gateway (or localhost if running locally outside docker?)
-            // WAIT! If we run this ON HOST, n8n is on localhost:5678 potentially?
-            // Actually, usually user runs 'node fake_oracle.js' on HOST.
-            // And N8N is in Docker.
-            // N8N is reachable via localhost:5678 usually?
-            // Let's try localhost:5678 first.
-            port: 5678,
+            hostname: '172.17.0.1',
+            port: 5678, // N8N Webhook Port
             path: `/webhook/${target.path}`,
             method: 'POST',
             headers: {
@@ -99,8 +104,6 @@ async function fireAll() {
                 resolve();
             });
             req.on('error', (e) => {
-                // Try Docker Gateway IP if localhost fails
-                // console.log(`(Retrying Gateway)...`);
                 console.log(`❌ ERROR: ${e.message}`);
                 resolve();
             });
@@ -108,6 +111,6 @@ async function fireAll() {
             req.end();
         });
 
-        await new Promise(r => setTimeout(r, 1500)); // Pace it
+        await new Promise(r => setTimeout(r, 1000));
     }
 }
