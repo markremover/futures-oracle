@@ -532,13 +532,41 @@ function connectWs() {
         } catch (e) { }
     });
 
+    // Heartbeat to keep connection alive
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.ping();
+        }
+    }, 30000);
+
     ws.on('close', () => {
-        console.log('Disconnected. Retrying in 5s...');
+        clearInterval(pingInterval);
+        console.log('⚠️ [WS] Disconnected. Reconnecting in 5s...');
         wsConnected = false;
         setTimeout(connectWs, 5000);
     });
 
-    ws.on('error', (e) => console.error(e));
+    ws.on('error', (e) => console.error(`❌ [WS ERROR] ${e.message}`));
+}
+
+// --- SMART REPORTER ---
+async function sendSystemReport(status: "STARTUP" | "ERROR", msg: string) {
+    const url = `${N8N_WEBHOOK_BASE}system`;
+    try {
+        await axios.post(url, {
+            type: "SYSTEM_REPORT",
+            level: status === "ERROR" ? "CRITICAL" : "INFO",
+            message: msg,
+            timestamp: Date.now()
+        });
+        console.log(`✅ [REPORT SENT] ${msg}`);
+    } catch (e: any) {
+        if (e.response && e.response.status === 404) {
+            console.log(`🔸 [REPORTING DISABLED] Create 'futurec-trigger-system' in N8N to receive Telegram alerts.`);
+        } else {
+            console.error(`⚠️ [REPORT FAILED] Connection error: ${e.message}`);
+        }
+    }
 }
 
 // --- SELF-DIAGNOSTIC (STARTUP CHECK) ---
@@ -551,22 +579,12 @@ function runStartupCheck() {
         console.log(`🔍 [DIAGNOSTIC] Connected: ${wsConnected}, Pairs: ${tracked}, Finnhub: Ready`);
 
         if (isHealthy) {
-            const url = `${N8N_WEBHOOK_BASE}system`; // e.g. futurec-trigger-system
-            try {
-                await axios.post(url, {
-                    type: "SYSTEM_STARTUP",
-                    status: "ACTIVE",
-                    message: `🟢 Futures Oracle Online. Tracking ${tracked} pairs. Finnhub Ready.`,
-                    timestamp: Date.now()
-                });
-                console.log(`✅ [REPORT] Startup Green Light sent to N8N!`);
-            } catch (e: any) {
-                console.error(`⚠️ [REPORT FAILED] Could not contact N8N: ${e.message}`);
-            }
+            sendSystemReport("STARTUP", `🟢 Futures Oracle Online. Tracking ${tracked} pairs.`);
         } else {
-            console.error(`🔴 [DIAGNOSTIC FAILED] Oracle is NOT healthy after 10s.`);
+            console.error(`🔴 [DIAGNOSTIC FAILED] Oracle is NOT healthy.`);
+            sendSystemReport("ERROR", "🔴 Oracle Startup FAILED. Check server logs!");
         }
-    }, 10000); // 10 seconds
+    }, 10000);
 }
 
 // --- MAIN ---
