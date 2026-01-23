@@ -417,8 +417,19 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
 
                 } catch (error: any) {
                     console.error(`[ERROR] AI Analysis Failed:`, error.message);
-                    res.writeHead(502);
-                    res.end(JSON.stringify({ error: 'Gemini Proxy Error', details: error.message }));
+
+                    let details = error.message;
+                    if (error.response) {
+                        console.error(`[AI ERROR DATA]`, JSON.stringify(error.response.data));
+                        details = `Gemini API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`;
+                    }
+
+                    res.writeHead(502, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        error: 'Gemini Proxy Error',
+                        details: details,
+                        solution: "Check API Key in N8N HTTP Request node."
+                    }));
                 }
             });
             return;
