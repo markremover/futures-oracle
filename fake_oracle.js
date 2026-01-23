@@ -18,36 +18,42 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
 
         if (req.url.includes('/candles')) {
-            // Fake Candles (Uptrend) -> UNIX TIMESTAMPS (Seconds)
-            const candles = [];
-            let price = 2500;
-            const nowSeconds = Math.floor(Date.now() / 1000); // FIX: Send Seconds, not ms
+            // FIX: Return Finnhub Format (Object of Arrays), NOT Array of Objects
+            const nowSeconds = Math.floor(Date.now() / 1000);
+            const count = 60;
 
-            for (let i = 0; i < 60; i++) {
-                price += 2;
-                candles.push({
-                    c: price,
-                    h: price + 1,
-                    l: price - 1,
-                    o: price,
-                    t: nowSeconds - (60 - i) * 60, // 1 minute intervals in seconds
-                    v: 1000
-                });
+            const data = {
+                c: [], h: [], l: [], o: [], t: [], v: [],
+                s: "ok"
+            };
+
+            let price = 2500;
+            for (let i = 0; i < count; i++) {
+                price += 2; // Uptrend
+                data.c.push(price);
+                data.h.push(price + 1);
+                data.l.push(price - 1);
+                data.o.push(price);
+                data.t.push(nowSeconds - (count - i) * 60);
+                data.v.push(1000);
             }
-            res.end(JSON.stringify(candles));
-            console.log("   [SERVER] 🕯️ Sent Fake Candles (Seconds Timestamp)");
+
+            res.end(JSON.stringify(data));
+            console.log("   [SERVER] 🕯️ Sent Fake Candles (Finnhub Format)");
             return;
         }
+
         if (req.url.includes('/price')) {
             res.end(JSON.stringify({ price: 2999.00 }));
             return;
         }
+
         if (req.url.includes('/analyze')) {
             console.log("   [SERVER] 🧠 Processing Analysis -> Returning 100% BUY");
             res.end(JSON.stringify({
                 signal: "BUY",
                 confidence: 100,
-                reasoning: "TEST MODE: ONE TERMINAL EXECUTION",
+                reasoning: "TEST MODE: ONE TERMINAL EXECUTION (FINNHUB FIX)",
                 macro_impact: "POSITIVE"
             }));
             return;
@@ -80,13 +86,13 @@ async function fireAll() {
             pair: target.symbol,
             price: 2500.00,
             trend: "STRONG_UPTREND",
-            rsi: 30,
+            rsi: 30, // Low RSI + Uptrend = Buy
             technical_status: "GOLDEN_CROSS",
             fng_value: 50,
             fng_label: "Neutral",
             news_sentiment: "Positive",
             sentiment: "TEST_MODE",
-            source: "ONE_TERMINAL_TEST_V3"
+            source: "ONE_TERMINAL_TEST_V4_FINNHUB"
         });
 
         const options = {
