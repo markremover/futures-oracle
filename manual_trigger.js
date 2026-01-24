@@ -17,16 +17,18 @@ async function fireAll() {
 
         console.log(`🔫 Firing ${target.symbol} -> ${url}`);
 
-        // Inject "TEST" into ALL fields to ensure N8N passes at least one to Oracle
+        // Inject "TEST" into ALL fields (using N8N internal names: trend_direction, rsi_value)
         const payload = {
             symbol: target.symbol,
             price: 2500.00,
-            sentiment: "BULLISH_TEST_MODE",  // <--- Trojan Horse 1
-            trend: "STRONG_UPTREND_TEST",   // <--- Trojan Horse 2
+            sentiment: "BULLISH_TEST_MODE",
+            trend: "STRONG_UPTREND_TEST",
+            trend_direction: "STRONG_UPTREND_TEST", // <--- Required for N8N mapping
             rsi: 35,
-            technical_status: "GOLDEN_CROSS_TEST", // <--- Trojan Horse 3
-            fng_value: 45,
-            fng_label: "Neutral",
+            rsi_value: 35, // <--- Required for N8N mapping
+            technical_status: "GOLDEN_CROSS_TEST",
+            fng_value: 80, // Extreme Greed
+            fng_label: "Extreme Greed",
             news_sentiment: "Positive",
             decision: "BUY",
             confidence: 99,
