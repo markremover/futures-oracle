@@ -414,8 +414,8 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
 4. Be conservative unless Shorting in a crash. High correlation between stocks and crypto means stock dump = crypto dump.
 `;
 
-                    // FIX: Using Stable Model to avoid beta/availability errors
-                    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                    // FIX: Reverting to Gemini 2.0 Flash (User's account supports this)
+                    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
                     const response = await axios.post(geminiUrl, {
                         contents: [{ parts: [{ text: prompt }] }]
