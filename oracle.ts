@@ -49,17 +49,22 @@ class PriceMonitor {
         const absChange = Math.abs(change);
 
         // --- DYNAMIC THRESHOLD (AGGRESSIVE SHORT) ---
-        // Default: 0.8% (More Active Mode)
+        // --- DYNAMIC THRESHOLD (SMART COPY) ---
+        // High Volatility (DOGE, SUI) -> 1.2%
+        // Standard (ETH, SOL, XRP)   -> 0.8%
+
         let threshold = 0.8;
+        if (pair.includes("DOGE") || pair.includes("SUI")) {
+            threshold = 1.2;
+        }
 
         // Check Global Stock Sentiment
-        // Accessing the global stockCache variable
         const sentiment = stockCache?.sentiment || "NEUTRAL";
 
         // If Market is Bearish/Crashing, be more sensitive to DROPS (Shorts)
         if ((sentiment === "BEARISH" || sentiment === "CRASH_WARNING") && change < 0) {
-            threshold = 0.5; // Trigger on 0.5% drop
-            // console.log(`🐻 [BEAR MODE] Lowering threshold for ${pair} to 0.5%`);
+            // Reduce threshold by 0.3% in crash mode
+            threshold = Math.max(0.5, threshold - 0.3);
         }
 
         if (absChange >= threshold) {
@@ -74,7 +79,7 @@ class PriceMonitor {
         // Debounce: 1 alert per 15 mins for same pair
         if (now - last < 900000) return;
 
-        console.log(`🚀 [ALERT] ${pair} triggered ${type}: ${value.toFixed(2)}%`);
+        console.log(`🚀 [ALERT] ${pair} triggered ${type}: ${value.toFixed(2)}% (Threshold checked)`);
         this.lastAlert.set(pair, now);
 
         // Construct unique URL: e.g. futurec-trigger-eth
@@ -409,7 +414,8 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
 4. Be conservative unless Shorting in a crash. High correlation between stocks and crypto means stock dump = crypto dump.
 `;
 
-                    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                    // FIX: Using Stable Model to avoid beta/availability errors
+                    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
                     const response = await axios.post(geminiUrl, {
                         contents: [{ parts: [{ text: prompt }] }]
