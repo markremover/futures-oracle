@@ -3,7 +3,6 @@ const axios = require('axios');
 // Using Docker Gateway IP (Standard for default bridge network)
 const targets = [
     { symbol: "ETH-USD", path: "futurec-trigger-eth" },
-    { symbol: "BTC-USD", path: "futurec-trigger-btc" },
     { symbol: "SOL-USD", path: "futurec-trigger-sol" },
     { symbol: "XRP-USD", path: "futurec-trigger-xrp" },
     { symbol: "DOGE-USD", path: "futurec-trigger-doge" },
