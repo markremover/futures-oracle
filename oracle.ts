@@ -374,7 +374,8 @@ function startServer() {
                         (data.source && data.source.includes("TEST")) ||
                         (data.sentiment && data.sentiment.includes("TEST")) ||
                         (data.technical_status && data.technical_status.includes("TEST")) ||
-                        (data.trend && data.trend.includes("TEST"));
+                        (data.trend && data.trend.includes("TEST")) ||
+                        (data.trend_direction && data.trend_direction.includes("TEST"));
 
                     if (isTest) {
                         console.log(`[TEST MODE] Bypassing AI for ${data.pair}. Returning 100% Confidence.`);
