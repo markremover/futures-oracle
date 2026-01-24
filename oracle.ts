@@ -362,17 +362,27 @@ function startServer() {
                     }
 
                     // --- BYPASS AI FOR TESTS ---
-                    if (data.source && data.source.includes("TEST")) {
+                    
+                    // --- ROBUST BYPASS AI FOR TESTS ---
+                    // Check MULTIPLE fields because N8N might filter 'source'
+                    const isTest = 
+                        (data.source && data.source.includes("TEST")) ||
+                        (data.sentiment && data.sentiment.includes("TEST")) ||
+                        (data.technical_status && data.technical_status.includes("TEST")) ||
+                        (data.trend && data.trend.includes("TEST"));
+
+                    if (isTest) {
                         console.log(`[TEST MODE] Bypassing AI for ${data.pair}. Returning 100% Confidence.`);
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({
-                            signal: "BUY",
-                            confidence: 100,
-                            reasoning: "TEST SIGNAL (AI BYPASSED)",
-                            macro_impact: "TEST MODE"
+                             signal: "BUY",
+                             confidence: 100,
+                             reasoning: "TEST SIGNAL (AI BYPASSED 100%)",
+                             macro_impact: "TEST MODE"
                         }));
                         return;
                     }
+
 
                     console.log(`[AI] Analyzing Market Data for ${data.pair || 'Crypto'}...`);
 

@@ -11,28 +11,24 @@ const targets = [
 ];
 
 async function fireAll() {
-    console.log("🚀 STARTING MASS TEST TRIGGER (PERFECT SETUP)...");
+    console.log("🚀 STARTING MASS TEST TRIGGER (TROJAN HORSE MODE)...");
 
     for (const target of targets) {
         const url = `http://172.17.0.1:5678/webhook/${target.path}`;
 
         console.log(`🔫 Firing ${target.symbol} -> ${url}`);
 
-        // RICH PAYLOAD to trick AI into High Confidence
+        // Inject "TEST" into ALL fields to ensure N8N passes at least one to Oracle
         const payload = {
             symbol: target.symbol,
             price: 2500.00,
-            sentiment: "BULLISH",
-
-            // Technical Indicators (Crucial for AI Confidence)
-            trend: "STRONG_UPTREND",
-            rsi: 35, // Oversold in uptrend = BUY signal
-            technical_status: "GOLDEN_CROSS_CONFIRMED",
+            sentiment: "BULLISH_TEST_MODE",  // <--- Trojan Horse 1
+            trend: "STRONG_UPTREND_TEST",   // <--- Trojan Horse 2
+            rsi: 35,
+            technical_status: "GOLDEN_CROSS_TEST", // <--- Trojan Horse 3
             fng_value: 45,
             fng_label: "Neutral",
             news_sentiment: "Positive",
-
-            // Bypass fields (just in case)
             decision: "BUY",
             confidence: 99,
             source: "MANUAL_TEST_TRIGGER"
@@ -45,8 +41,8 @@ async function fireAll() {
             console.error(`❌ FAILED: ${target.symbol}`, err.message);
         }
 
-        // Wait 3s to be gentle on new API Key
-        await new Promise(r => setTimeout(r, 3000));
+        // Wait 2s
+        await new Promise(r => setTimeout(r, 2000));
     }
     console.log("🏁 DONE. Check Telegram for 6 messages.");
 }
