@@ -1,4 +1,5 @@
 const http = require('http');
+const url = require('url'); // Required for parsing query params
 
 const PORT = 3001;
 const TARGETS = [
@@ -13,31 +14,33 @@ const TARGETS = [
 // --- 1. THE FAKE SERVER (BRAIN) ---
 const server = http.createServer((req, res) => {
     let body = '';
+
+    // Parse URL to get query parameters (like ?pair=ETH-PERP)
+    const parsedUrl = url.parse(req.url, true);
+    const queryPair = parsedUrl.query.pair || "UNKNOWN-PERP";
+
     req.on('data', chunk => body += chunk.toString());
     req.on('end', () => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
 
         if (req.url.includes('/candles')) {
             // FIX: Return LEGACY COINBASE Format (Array of Arrays)
-            // Structure: [ time, low, high, open, close, volume ]
             const nowSeconds = Math.floor(Date.now() / 1000);
-            const count = 300; // N8N asks for limit 300
+            const count = 300;
 
             const candles = [];
             let price = 2500;
 
-            // Generate valid candle history
             for (let i = 0; i < count; i++) {
-                price += 2; // Uptrend
-                const time = nowSeconds - (count - i) * 3600; // Hourly candles
+                price += 2;
+                const time = nowSeconds - (count - i) * 3600;
                 const low = price - 5;
                 const high = price + 5;
                 const open = price - 1;
                 const close = price;
                 const volume = 1000;
 
-                // Matches N8N code expectation: c[4] is close, c[2] high, c[1] low
-                candles.unshift([time, low, high, open, close, volume]); // Unshift because N8N usually expects index 0 to be NEWEST
+                candles.unshift([time, low, high, open, close, volume]);
             }
 
             res.end(JSON.stringify(candles));
@@ -46,7 +49,11 @@ const server = http.createServer((req, res) => {
         }
 
         if (req.url.includes('/price')) {
-            res.end(JSON.stringify({ price: 2999.00 }));
+            // FIX: Return 'pair' so N8N doesn't choke
+            res.end(JSON.stringify({
+                price: 2999.00,
+                pair: queryPair // Echo content back
+            }));
             return;
         }
 
@@ -55,7 +62,7 @@ const server = http.createServer((req, res) => {
             res.end(JSON.stringify({
                 signal: "BUY",
                 confidence: 100,
-                reasoning: "TEST MODE: ONE TERMINAL EXECUTION (COINBASE FIX)",
+                reasoning: "TEST MODE: ONE TERMINAL EXECUTION (FINAL FIX)",
                 macro_impact: "POSITIVE"
             }));
             return;
@@ -86,14 +93,20 @@ async function fireAll() {
             symbol: target.symbol,
             pair: target.symbol,
             price: 2500.00,
-            trend: "STRONG_UPTREND",
+
+            // FIX: N8N expects 'trend_direction', NOT 'trend'
+            trend_direction: "STRONG_UPTREND",
+            trend: "STRONG_UPTREND", // Send both for safety!
+
+            rsi_value: 30, // N8N might look for rsi_value too
             rsi: 30,
+
             technical_status: "GOLDEN_CROSS",
             fng_value: 50,
             fng_label: "Neutral",
             news_sentiment: "Positive",
             sentiment: "TEST_MODE",
-            source: "SIMULATION_MODE_COINBASE_FIX"
+            source: "SIMULATION_MODE_FINAL"
         });
 
         const options = {
