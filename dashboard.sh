@@ -36,5 +36,6 @@ fi
 echo ""
 echo -e "${BLUE}=================================================${NC}"
 echo -e "💡 To update Oracle:  git pull && docker-compose up -d --build"
+echo -e "💡 To start Oracle:   bash start_oracle.sh"
 echo -e "💡 To view full logs: docker logs -f futures-oracle"
 echo -e "${BLUE}=================================================${NC}"
