@@ -49,8 +49,8 @@ class PriceMonitor {
         const absChange = Math.abs(change);
 
         // --- DYNAMIC THRESHOLD (AGGRESSIVE SHORT) ---
-        // Default: 1.5%
-        let threshold = 1.5;
+        // Default: 0.8% (More Active Mode)
+        let threshold = 0.8;
 
         // Check Global Stock Sentiment
         // Accessing the global stockCache variable
@@ -58,8 +58,8 @@ class PriceMonitor {
 
         // If Market is Bearish/Crashing, be more sensitive to DROPS (Shorts)
         if ((sentiment === "BEARISH" || sentiment === "CRASH_WARNING") && change < 0) {
-            threshold = 1.0; // Trigger on 1% drop
-            // console.log(`🐻 [BEAR MODE] Lowering threshold for ${pair} to 1.0%`);
+            threshold = 0.5; // Trigger on 0.5% drop
+            // console.log(`🐻 [BEAR MODE] Lowering threshold for ${pair} to 0.5%`);
         }
 
         if (absChange >= threshold) {
@@ -362,10 +362,10 @@ function startServer() {
                     }
 
                     // --- BYPASS AI FOR TESTS ---
-                    
+
                     // --- ROBUST BYPASS AI FOR TESTS ---
                     // Check MULTIPLE fields because N8N might filter 'source'
-                    const isTest = 
+                    const isTest =
                         (data.source && data.source.includes("TEST")) ||
                         (data.sentiment && data.sentiment.includes("TEST")) ||
                         (data.technical_status && data.technical_status.includes("TEST")) ||
@@ -375,10 +375,10 @@ function startServer() {
                         console.log(`[TEST MODE] Bypassing AI for ${data.pair}. Returning 100% Confidence.`);
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({
-                             signal: "BUY",
-                             confidence: 100,
-                             reasoning: "TEST SIGNAL (AI BYPASSED 100%)",
-                             macro_impact: "TEST MODE"
+                            signal: "BUY",
+                            confidence: 100,
+                            reasoning: "TEST SIGNAL (AI BYPASSED 100%)",
+                            macro_impact: "TEST MODE"
                         }));
                         return;
                     }
