@@ -27,6 +27,14 @@ echo -e "${YELLOW}[ Checking Futures Oracle... ]${NC}"
 if docker ps | grep -q "futures-oracle"; then
     echo -e "${GREEN}✅ ACTIVE${NC} (Container: futures-oracle)"
     echo -e "   Status: $(docker ps --filter "name=futures-oracle" --format "{{.Status}}")"
+    
+    # Smart Health Check
+    if docker logs --tail 20 futures-oracle | grep -q "Connected: true"; then
+         echo -e "   Health: ${GREEN}🟢 SYSTEM ONLINE & WATCHING MARKETS${NC}"
+    else
+         echo -e "   Health: ${YELLOW}🟡 INITIALIZING...${NC}"
+    fi
+
     echo -e "   ${BLUE}Recent Logs:${NC}" 
     docker logs --tail 3 futures-oracle | sed 's/^/   / '
 else
