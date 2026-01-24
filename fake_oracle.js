@@ -4,7 +4,6 @@ const url = require('url');
 const PORT = 3001;
 const TARGETS = [
     { symbol: "ETH-USD", path: "futurec-trigger-eth" },
-    { symbol: "BTC-USD", path: "futurec-trigger-btc" },
     { symbol: "SOL-USD", path: "futurec-trigger-sol" },
     { symbol: "XRP-USD", path: "futurec-trigger-xrp" },
     { symbol: "DOGE-USD", path: "futurec-trigger-doge" },
