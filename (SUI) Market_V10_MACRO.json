@@ -26,10 +26,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        368,
-        256
+        464,
+        400
       ],
-      "id": "3e89c5f2-10d6-4a81-a1a6-409ef0767bae",
+      "id": "68974fd3-adf5-4eab-bd44-71cc5a1fed05",
       "name": "Historical Candles"
     },
     {
@@ -51,10 +51,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        528,
-        256
+        624,
+        400
       ],
-      "id": "f1785db6-4480-4e38-a3e0-b2184e280bad",
+      "id": "97a53ff3-2e17-4193-924d-4654f3c8faab",
       "name": "Current_Price",
       "retryOnFail": true,
       "maxTries": 5,
@@ -69,10 +69,12 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        1136,
-        496
+        272,
+        400
       ],
-      "name": "Webhook"
+      "name": "Webhook",
+      "id": "715d39fb-5e0f-4b55-a72e-1f6f9d9314a4",
+      "webhookId": "b8d2399f-eeda-4278-a3b7-2d0eec6b09a7"
     },
     {
       "parameters": {
@@ -82,10 +84,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        848,
-        256
+        944,
+        400
       ],
-      "id": "bd9dee94-74d2-430f-8fd7-bddda4495c35",
+      "id": "47c13162-64fa-415c-9ffd-6a678ffc04f2",
       "name": "F&G Index"
     },
     {
@@ -96,10 +98,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1040,
-        256
+        1136,
+        400
       ],
-      "id": "a3354ba6-2647-4a37-9572-7d61b49a2702",
+      "id": "1c308426-038b-4b1c-9506-26d9388a9576",
       "name": "News/Sentiment"
     },
     {
@@ -110,10 +112,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1232,
-        256
+        1328,
+        400
       ],
-      "id": "eee64426-fbb1-4dea-9a38-cd8ea3470dcc",
+      "id": "c8ab034a-335f-46e0-9817-c4b659d1e0b3",
       "name": "Macro Calendar"
     },
     {
@@ -152,55 +154,29 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        400,
-        464
+        496,
+        608
       ],
-      "id": "aec348e8-249b-4874-aab5-a5aae938e09f",
+      "id": "36cb96c5-fc11-4fc3-a545-4a4910670c93",
       "name": "Risk Filter"
     },
     {
       "parameters": {
-        "jsCode": "// --- CONFIGURATION ---\nconst PERIOD = 14;\nconst ATR_MAX_THRESHOLD = 0.01; \nconst RSI_NEUTRAL_MIN = 48;\nconst RSI_NEUTRAL_MAX = 52;\n\n// --- GET DATA FROM CANDLES ---\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\n// --- GET ORIGINAL WEBHOOK DATA (Pass-Through) ---\n// CRITICAL FIX: Preserve 'source' field from Webhook (Current_Price overwrites it)\nlet webhookData = {};\nlet originalSource = 'LIVE'; // Default\ntry {\n    const whData = $('Webhook').first().json;\n    webhookData = whData;\n    originalSource = whData.source || 'LIVE';\n} catch (e) {}\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    // Index 0 is the most recent candle in Coinbase API\n    const lastCandle = candleData[0]; \n    // Support both Finnhub {c:[]} and Coinbase [[t,l,h,o,c,v]] formats\n    if (Array.isArray(lastCandle)) {\n        current_price = parseFloat(lastCandle[4]); // Coinbase\n    } else {\n        current_price = parseFloat(lastCandle['c'] || 0); // Flat object fallback\n    }\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\n// --- PARSE CANDLES FOR CALCULATION ---\n// Handle Coinbase Format [[time, low, high, open, close, vol], ...]\nconst candles = candleData.map(c => ({\n    close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c['4'] || c.close || 0),\n    high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c['2'] || c.high || 0),\n    low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c['1'] || c.low || 0)\n}));\n\n// --- CALCULATION FUNCTIONS ---\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    ...webhookData,\n    source: originalSource, // <--- FORCE OVERRIDE: Restore original source from Webhook\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
+        "jsCode": "// --- CONFIGURATION ---\nconst PERIOD = 14;\nconst ATR_MAX_THRESHOLD = 0.01; \nconst RSI_NEUTRAL_MIN = 48;\nconst RSI_NEUTRAL_MAX = 52;\n\n// --- GET DATA FROM CANDLES ---\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\n// --- GET ORIGINAL WEBHOOK DATA (Pass-Through) ---\n// Fix: Grab data from Webhook to ensure trend/status aren't lost in Test Mode\nlet webhookData = {};\ntry {\n    webhookData = $('Webhook').first().json;\n} catch (e) {}\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    // Index 0 is the most recent candle in Coinbase API\n    const lastCandle = candleData[0]; \n    // Support both Finnhub {c:[]} and Coinbase [[t,l,h,o,c,v]] formats\n    if (Array.isArray(lastCandle)) {\n        current_price = parseFloat(lastCandle[4]); // Coinbase\n    } else {\n        current_price = parseFloat(lastCandle['c'] || 0); // Flat object fallback\n    }\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\n// --- PARSE CANDLES FOR CALCULATION ---\n// Handle Coinbase Format [[time, low, high, open, close, vol], ...]\nconst candles = candleData.map(c => ({\n    close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c['4'] || c.close || 0),\n    high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c['2'] || c.high || 0),\n    low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c['1'] || c.low || 0)\n}));\n\n// --- CALCULATION FUNCTIONS ---\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    ...webhookData, // <--- CRITICAL FIX: Pass through original fields (trend, etc.)\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1184,
-        -96
+        784,
+        400
       ],
-      "id": "181b1eb8-0a5a-41ca-bdfe-823692ffda97",
+      "id": "033969f6-93df-4c28-92c2-de0370de365e",
       "name": "Code/Function (ATR/RSI Filter)"
     },
     {
       "parameters": {
-        "jsCode": "const input = items[0].json;\nconst entry = parseFloat(input.current_price || 0);\nconst signal = input.final_signal || \"WAIT\";\n\n// --- SETTINGS (SUI) ---\nconst size = \"500\";\nconst riskAmount = 10;\nconst profitAmount = 20;\n\nconst move = riskAmount / parseFloat(size);\nconst pMove = profitAmount / parseFloat(size);\n\nlet sl = 0;\nlet tp = 0;\n\nif (signal === \"BUY\") {\n    sl = entry - move;\n    tp = entry + pMove;\n} else {\n    sl = entry + move;\n    tp = entry - pMove;\n}\n\nreturn [{\n    json: {\n        ...input,\n        PRODUCT_ID: \"SUI-PERP\",\n        side: signal,\n        confidence: input.confidence_score,\n        position_size: size,\n        entry_price: entry.toFixed(3),\n        sl_price: sl.toFixed(3),\n        tp_price: tp.toFixed(3)\n    }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        608,
-        448
-      ],
-      "id": "560cbf8e-2035-4059-95a7-d4c31accbec0",
-      "name": "Code/Function (Position Sizing)"
-    },
-    {
-      "parameters": {
-        "jsCode": "/* \n   SIGNAL MODE (MANUAL TRADING) - V2\n   ---------------------------------------------------\n   Goal: Format trade details for Telegram.\n   Improvements: Visual distinction for LONG vs SHORT.\n   ---------------------------------------------------\n*/\n\nconst input = items[0].json || {};\n\n// 1. EXTRACT DATA (Calculated in 'Position Sizing' node)\nconst side = input.side || \"BUY\"; // \"BUY\" or \"SELL\"\nconst entry = parseFloat(input.current_price || 0).toFixed(3);\nconst sl = parseFloat(input.sl_price || 0).toFixed(3);\nconst tp = parseFloat(input.tp_price || 0).toFixed(3);\nconst size = input.position_size; // DYNAMIC FROM PREVIOUS NODE\n\n// 2. DEFINE VISUALS\nlet title = \"\";\nlet body = \"\";\n\nif (side === \"BUY\") {\n    title = \"🟢 SUI LONG (BUY) SIGNAL\";\n    body = `\n    📈 **DIRECTION:** LONG (Green)\n    💰 **Entry Price:** ${entry}\n    \n    🛑 **Stop Loss:** ${sl}\n    ✅ **Take Profit:** ${tp}\n    \n    📦 **Size:** ${size} SUI\n    \n    ⚠️ *Open Coinbase and Buy manually!*\n    `.trim();\n} else {\n    title = \"🔴 SUI SHORT (SELL) SIGNAL\";\n    body = `\n    📉 **DIRECTION:** SHORT (Red)\n    💰 **Entry Price:** ${entry}\n    \n    🛑 **Stop Loss:** ${sl}\n    ✅ **Take Profit:** ${tp}\n    \n    📦 **Size:** ${size} SUI\n    \n    ⚠️ *Open Coinbase and Sell manually!*\n    `.trim();\n}\n\n// 3. OUTPUT FOR TELEGRAM NODE\nreturn [{\n    json: {\n        ...input,\n        success: true, // Pass-through\n        status: \"MANUAL_SIGNAL\",\n        // These fields must match exactly what you use in the Telegram Node expressions:\n        message_title: title,\n        message_body: body,\n        signal_side: side\n    }\n}];\n"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        800,
-        448
-      ],
-      "id": "9c0b38ad-aa8a-4d3f-ab59-1292b5bbd8c3",
-      "name": "Code/Function (SL/TP Jobs)1"
-    },
-    {
-      "parameters": {
         "chatId": "5687487073",
-        "text": "={{$json.message_title}}  {{$json.message_body}}\n\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{$json.confidence_score}}%",
+        "text": "={{ $json.success ? '✅ ORDER EXECUTED' : '❌ ORDER FAILED' }}\\n\\nPair: {{ $json.pair || 'ETH-USD' }}\\nSignal: {{ $json.signal || $json.final_signal }}\\nEntry: {{ $json.entry_price }}\\nOrder ID: {{ $json.order_id }}\\nContracts: {{ $json.contracts }}\\nSL: {{ $json.sl_price }} | TP: {{ $json.tp_price }}\\nMargin Used: ${{ $json.margin_used }}\\n\\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{ $json.confidence_score || $json.confidence }}%",
         "additionalFields": {
           "parse_mode": "HTML"
         }
@@ -208,15 +184,15 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1008,
-        448
+        1104,
+        592
       ],
-      "id": "e7bca21e-547a-4ae1-8134-b5e810a25198",
+      "id": "a8f16171-9588-4000-bd20-d55a9b6950e4",
       "name": "Telegram (Report)",
       "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
       "credentials": {
         "telegramApi": {
-          "id": "ivTcOnSN0qURvGop",
+          "id": "2HnE4TLrYpz4Yd6o",
           "name": "Telegram account"
         }
       }
@@ -228,10 +204,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        208,
-        464
+        304,
+        608
       ],
-      "id": "1b85b853-cb2b-4fb9-a3bb-b4a6f07964a8",
+      "id": "f6d2f770-8806-4c83-9be9-07ec81af4d6c",
       "name": "Parser"
     },
     {
@@ -242,10 +218,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1424,
-        256
+        1520,
+        400
       ],
-      "id": "e7b8c9d0-1a2b-3c4d-5e6f-7g8h9i0j1k2l",
+      "id": "6227e404-aa6f-4219-b81f-6e0ec64309f3",
       "name": "Market Context"
     },
     {
@@ -254,32 +230,39 @@
         "url": "http://172.17.0.1:3001/analyze",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"source\": \"{{ $('Webhook').first().json.source || 'LIVE' }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyBdQ5vi9hHwLohrvnVKA1Q1x6fAOKQXADw\"\n}",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyD4bQ1aUJwlYmiN7ihXfdbE6oj2iHpSXOc\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1616,
-        256
+        1712,
+        400
       ],
-      "id": "db91055e-2f63-48d3-adbd-d553699802aa",
+      "id": "a1072214-b1a7-4773-9494-a1bef9de5a9d",
       "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/execute-order",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pair\": \"SUI-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"entry_price\": {{ $json.current_price }},\n  \"sl_price\": {{ $json.current_price - 5 }},\n  \"tp_price\": {{ $json.current_price + 10 }},\n  \"risk_amount\": 10\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        704,
+        592
+      ],
+      "id": "execute-order-sui-1769394496458",
+      "name": "Execute Order (Oracle API)"
     }
   ],
   "pinData": {},
   "connections": {
-    "Webhook": {
-      "main": [
-        [
-          {
-            "node": "Historical Candles",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Historical Candles": {
       "main": [
         [
@@ -296,17 +279,6 @@
         [
           {
             "node": "Code/Function (ATR/RSI Filter)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Schedule Trigger": {
-      "main": [
-        [
-          {
-            "node": "Historical Candles",
             "type": "main",
             "index": 0
           }
@@ -361,7 +333,7 @@
       "main": [
         [
           {
-            "node": "Code/Function (Position Sizing)",
+            "node": "Execute Order (Oracle API)",
             "type": "main",
             "index": 0
           }
@@ -373,28 +345,6 @@
         [
           {
             "node": "F&G Index",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code/Function (Position Sizing)": {
-      "main": [
-        [
-          {
-            "node": "Code/Function (SL/TP Jobs)1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code/Function (SL/TP Jobs)1": {
-      "main": [
-        [
-          {
-            "node": "Telegram (Report)",
             "type": "main",
             "index": 0
           }
@@ -422,6 +372,28 @@
           }
         ]
       ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Historical Candles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Order (Oracle API)": {
+      "main": [
+        [
+          {
+            "node": "Telegram (Report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -429,10 +401,11 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "cef60b52-36cf-4ddb-83b4-22b060dd9f43",
+  "versionId": "0a36135e-44bb-4018-b73c-58302b3abe29",
   "meta": {
-    "instanceId": "339b794e03f1726cac62299fb8b8908a3e18b0ee606aaeaa368b5c0b843b6abc"
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dbc77a83d2b4b81619f9b25f03d3eb04bad62bf94cb1838a3d14a7b99cb0d36c"
   },
-  "id": "NkdQ8Da53lLq9S02",
+  "id": "gs2x34iDZ5asJwgF",
   "tags": []
 }

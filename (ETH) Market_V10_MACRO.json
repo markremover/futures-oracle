@@ -26,10 +26,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1312,
-        496
+        2560,
+        304
       ],
-      "id": "0e416567-1cca-420d-af93-dcc772d2bb3c",
+      "id": "35e71528-661e-474f-bcd9-37ea278eacf8",
       "name": "Historical Candles"
     },
     {
@@ -51,10 +51,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1472,
-        496
+        2720,
+        304
       ],
-      "id": "4a4a05ca-747a-4830-9d3d-99767fcb6911",
+      "id": "c1671dae-b34a-4ee3-805e-5910b06bce01",
       "name": "Current_Price",
       "retryOnFail": true,
       "maxTries": 5,
@@ -69,10 +69,12 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        1136,
-        496
+        2368,
+        304
       ],
-      "name": "Webhook"
+      "name": "Webhook",
+      "id": "92cfd4a0-7b13-427d-acff-81538248ff4b",
+      "webhookId": "4b9f4cde-637e-49fd-8239-5b5470b544db"
     },
     {
       "parameters": {
@@ -82,10 +84,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1792,
-        496
+        3040,
+        304
       ],
-      "id": "c55b60ad-c58e-4c2e-bd9c-f9297a9d523d",
+      "id": "ae12f9d3-fccc-41ac-baad-f6ffd9b26da6",
       "name": "F&G Index"
     },
     {
@@ -96,10 +98,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1984,
-        496
+        3232,
+        304
       ],
-      "id": "873f5305-2d35-4169-b180-dcf923d36c73",
+      "id": "e9f05b54-dad6-400d-92ee-52b1942b13c4",
       "name": "News/Sentiment"
     },
     {
@@ -110,10 +112,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2176,
-        496
+        3424,
+        304
       ],
-      "id": "bf63c80b-10e8-40d1-a917-36d12caec5a3",
+      "id": "c314fe90-5aa1-4dcd-ac22-87859881f797",
       "name": "Macro Calendar"
     },
     {
@@ -152,10 +154,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1344,
-        704
+        2592,
+        512
       ],
-      "id": "1263b096-35d0-4aab-9685-54c757fb5a6a",
+      "id": "84ccffb8-107f-4f3a-b455-2161c0514ac1",
       "name": "Risk Filter"
     },
     {
@@ -165,42 +167,16 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1632,
-        496
+        2880,
+        304
       ],
-      "id": "e4e21ac3-74d5-4abe-bac0-cd40aabf4b10",
+      "id": "99425ffb-3ef9-4fec-9a4a-81548eb856d5",
       "name": "Code/Function (ATR/RSI Filter)"
     },
     {
       "parameters": {
-        "jsCode": "const input = items[0].json;\nconst entry = parseFloat(input.current_price || 0);\nconst signal = input.final_signal || \"WAIT\";\n\n// --- SETTINGS (ETH) ---\nconst size = \"0.1\"; // 0.1 ETH\nconst riskAmount = 10;\nconst profitAmount = 20;\n\nconst move = riskAmount / parseFloat(size);\nconst pMove = profitAmount / parseFloat(size);\n\nlet sl = 0;\nlet tp = 0;\n\nif (signal === \"BUY\") {\n    sl = entry - move;\n    tp = entry + pMove;\n} else {\n    sl = entry + move;\n    tp = entry - pMove;\n}\n\nreturn [{\n    json: {\n        ...input,\n        PRODUCT_ID: \"ETH-PERP\",\n        side: signal,\n        confidence: input.confidence_score,\n        position_size: size,\n        entry_price: entry.toFixed(2),\n        sl_price: sl.toFixed(2),\n        tp_price: tp.toFixed(2)\n    }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1552,
-        688
-      ],
-      "id": "1d5a4133-f515-4ad8-9bd8-ac99839aba4c",
-      "name": "Code/Function (Position Sizing)"
-    },
-    {
-      "parameters": {
-        "jsCode": "/* \n   SIGNAL MODE (MANUAL TRADING) - V2\n   ---------------------------------------------------\n   Goal: Format trade details for Telegram.\n   Improvements: Visual distinction for LONG vs SHORT.\n   ---------------------------------------------------\n*/\n\nconst input = items[0].json || {};\n\n// 1. EXTRACT DATA (Calculated in 'Position Sizing' node)\nconst side = input.side || \"BUY\"; // \"BUY\" or \"SELL\"\nconst entry = parseFloat(input.current_price || 0).toFixed(2);\nconst sl = parseFloat(input.sl_price || 0).toFixed(2);\nconst tp = parseFloat(input.tp_price || 0).toFixed(2);\nconst size = input.position_size; // DYNAMIC FROM PREVIOUS NODE\n\n// 2. DEFINE VISUALS\nlet title = \"\";\nlet body = \"\";\n\nif (side === \"BUY\") {\n    title = \"🟢 ETH LONG (BUY) SIGNAL\";\n    body = `\n    📈 **DIRECTION:** LONG (Green)\n    💰 **Entry Price:** ${entry}\n    \n    🛑 **Stop Loss:** ${sl}\n    ✅ **Take Profit:** ${tp}\n    \n    📦 **Size:** ${size} ETH\n    \n    ⚠️ *Open Coinbase and Buy manually!*\n    `.trim();\n} else {\n    title = \"🔴 ETH SHORT (SELL) SIGNAL\";\n    body = `\n    📉 **DIRECTION:** SHORT (Red)\n    💰 **Entry Price:** ${entry}\n    \n    🛑 **Stop Loss:** ${sl}\n    ✅ **Take Profit:** ${tp}\n    \n    📦 **Size:** ${size} ETH\n    \n    ⚠️ *Open Coinbase and Sell manually!*\n    `.trim();\n}\n\n// 3. OUTPUT FOR TELEGRAM NODE\nreturn [{\n    json: {\n        ...input,\n        success: true, // Pass-through\n        status: \"MANUAL_SIGNAL\",\n        // These fields must match exactly what you use in the Telegram Node expressions:\n        message_title: title,\n        message_body: body,\n        signal_side: side\n    }\n}];\n"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1744,
-        688
-      ],
-      "id": "47a1e14a-5bb4-4eb1-a58c-33b561262167",
-      "name": "Code/Function (SL/TP Jobs)1"
-    },
-    {
-      "parameters": {
         "chatId": "5687487073",
-        "text": "={{$json.message_title}}  {{$json.message_body}}\n\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{$json.confidence_score}}%",
+        "text": "={{ $json.success ? '✅ ORDER EXECUTED' : '❌ ORDER FAILED' }}\\n\\nPair: {{ $json.pair || 'ETH-USD' }}\\nSignal: {{ $json.signal || $json.final_signal }}\\nEntry: {{ $json.entry_price }}\\nOrder ID: {{ $json.order_id }}\\nContracts: {{ $json.contracts }}\\nSL: {{ $json.sl_price }} | TP: {{ $json.tp_price }}\\nMargin Used: ${{ $json.margin_used }}\\n\\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{ $json.confidence_score || $json.confidence }}%",
         "additionalFields": {
           "parse_mode": "HTML"
         }
@@ -208,15 +184,15 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1952,
-        688
+        3200,
+        496
       ],
-      "id": "15ecc0ac-127b-4a0b-a229-7fd9180bd2e9",
+      "id": "35bb144d-58ff-4ba0-afd3-ba32a81cde1d",
       "name": "Telegram (Report)",
       "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
       "credentials": {
         "telegramApi": {
-          "id": "ivTcOnSN0qURvGop",
+          "id": "2HnE4TLrYpz4Yd6o",
           "name": "Telegram account"
         }
       }
@@ -228,10 +204,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1152,
-        704
+        2400,
+        512
       ],
-      "id": "6237a20f-aa68-499a-be18-c60d33db3783",
+      "id": "87a772fa-f337-4fc9-9b43-8ab13c14551e",
       "name": "Parser"
     },
     {
@@ -242,10 +218,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2368,
-        496
+        3616,
+        304
       ],
-      "id": "e7b8c9d0-1a2b-3c4d-5e6f-7g8h9i0j1k2l",
+      "id": "58241d10-a221-40b1-95aa-f4bb7c21c29f",
       "name": "Market Context"
     },
     {
@@ -254,17 +230,35 @@
         "url": "http://172.17.0.1:3001/analyze",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"source\": \"{{ $('Webhook').first().json.source || 'LIVE' }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyBdQ5vi9hHwLohrvnVKA1Q1x6fAOKQXADw\"\n}",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"source\": \"{{ $('Webhook').first().json.source || 'LIVE' }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyD4bQ1aUJwlYmiN7ihXfdbE6oj2iHpSXOc\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2560,
+        3808,
+        304
+      ],
+      "id": "483d1dc4-4c96-425e-8994-6118af8fae6e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/execute-order",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pair\": \"ETH-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"entry_price\": {{ $json.current_price }},\n  \"sl_price\": {{ $json.current_price - 5 }},\n  \"tp_price\": {{ $json.current_price + 10 }},\n  \"risk_amount\": 10\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2800,
         496
       ],
-      "id": "1ee69ba3-0f53-486a-b341-612410753988",
-      "name": "HTTP Request"
+      "id": "execute-order-eth-1769394496451",
+      "name": "Execute Order (Oracle API)"
     }
   ],
   "pinData": {},
@@ -296,17 +290,6 @@
         [
           {
             "node": "Code/Function (ATR/RSI Filter)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Schedule Trigger": {
-      "main": [
-        [
-          {
-            "node": "Historical Candles",
             "type": "main",
             "index": 0
           }
@@ -361,7 +344,7 @@
       "main": [
         [
           {
-            "node": "Code/Function (Position Sizing)",
+            "node": "Execute Order (Oracle API)",
             "type": "main",
             "index": 0
           }
@@ -373,28 +356,6 @@
         [
           {
             "node": "F&G Index",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code/Function (Position Sizing)": {
-      "main": [
-        [
-          {
-            "node": "Code/Function (SL/TP Jobs)1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code/Function (SL/TP Jobs)1": {
-      "main": [
-        [
-          {
-            "node": "Telegram (Report)",
             "type": "main",
             "index": 0
           }
@@ -422,6 +383,17 @@
           }
         ]
       ]
+    },
+    "Execute Order (Oracle API)": {
+      "main": [
+        [
+          {
+            "node": "Telegram (Report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -429,11 +401,11 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "9b0fe46b-3d49-404e-8818-a46409427ff5",
+  "versionId": "d3d64d23-74b4-4c0b-a453-797aa95a601c",
   "meta": {
     "templateCredsSetupCompleted": true,
-    "instanceId": "339b794e03f1726cac62299fb8b8908a3e18b0ee606aaeaa368b5c0b843b6abc"
+    "instanceId": "dbc77a83d2b4b81619f9b25f03d3eb04bad62bf94cb1838a3d14a7b99cb0d36c"
   },
-  "id": "rGceVwnSgv885hop",
+  "id": "ItU8qRxX5QY0V6Xk",
   "tags": []
 }
