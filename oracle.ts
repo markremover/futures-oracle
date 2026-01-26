@@ -503,7 +503,130 @@ function startServer() {
             return;
         }
 
-        // 5. FEAR AND GREED PROXY (NEW)
+        // 5. EXECUTE ORDER (V20 - AUTONOMOUS TRADING)
+        if (req.method === 'POST' && parsedUrl.pathname === '/execute-order') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body);
+                    const { pair, signal, entry_price, sl_price, tp_price, risk_amount = 10 } = data;
+
+                    if (!pair || !signal || !entry_price || !sl_price || !tp_price) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Missing required fields: pair, signal, entry_price, sl_price, tp_price' }));
+                        return;
+                    }
+
+                    console.log(`🚀 [EXECUTE ORDER] ${signal} ${pair} @ ${entry_price}`);
+
+                    // Step 1: Calculate position size
+                    await refreshAccountData();
+                    const leverage = leverageCache.get(pair) || 1;
+                    const balance = accountBalance;
+
+                    const slDistance = Math.abs(entry_price - sl_price);
+                    const contracts = risk_amount / slDistance;
+                    const notional = contracts * entry_price;
+                    const marginRequired = notional / leverage;
+
+                    // Validate margin
+                    if (marginRequired > balance * 0.95) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Insufficient margin',
+                            margin_required: marginRequired.toFixed(2),
+                            balance: balance.toFixed(2)
+                        }));
+                        console.log(`❌ [ORDER BLOCKED] Insufficient margin for ${pair}`);
+                        return;
+                    }
+
+                    // Validate min notional
+                    if (notional < 10) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Below minimum notional',
+                            notional: notional.toFixed(2)
+                        }));
+                        console.log(`❌ [ORDER BLOCKED] Below min notional for ${pair}`);
+                        return;
+                    }
+
+                    // Step 2: Send Market Order with Bracket TP/SL to Coinbase
+                    const productId = `${pair}-PERP`;
+                    const side = signal.toUpperCase(); // BUY or SELL
+                    const clientOrderId = `oracle-${Date.now()}-${pair}`;
+
+                    const orderPayload = {
+                        client_order_id: clientOrderId,
+                        product_id: productId,
+                        side: side,
+                        order_configuration: {
+                            market_market_fok: {
+                                quote_size: notional.toFixed(2)
+                            }
+                        },
+                        attached_order_configuration: {
+                            trigger_bracket_gtc: {
+                                stop_trigger_price: sl_price.toString(),
+                                limit_price_stop: sl_price.toString(),
+                                limit_price_take_profit: tp_price.toString()
+                            }
+                        }
+                    };
+
+                    const path = '/orders';
+                    const jwt = generateCoinbaseJWT('POST', path);
+
+                    console.log(`📤 [COINBASE API] Sending bracket order: ${contracts.toFixed(4)} contracts, SL: ${sl_price}, TP: ${tp_price}`);
+
+                    const response = await axios.post(
+                        `${COINBASE_API_URL}${path}`,
+                        orderPayload,
+                        {
+                            headers: {
+                                'Authorization': `Bearer ${jwt}`,
+                                'Content-Type': 'application/json'
+                            },
+                            timeout: 10000
+                        }
+                    );
+
+                    // Success - return order details
+                    const orderId = response.data.success_response?.order_id || response.data.order_id || 'UNKNOWN';
+                    const filledPrice = parseFloat(response.data.success_response?.average_filled_price || entry_price);
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        order_id: orderId,
+                        entry_price: filledPrice,
+                        contracts: contracts.toFixed(4),
+                        sl_price: sl_price,
+                        tp_price: tp_price,
+                        notional: notional.toFixed(2),
+                        margin_used: marginRequired.toFixed(2),
+                        leverage: leverage
+                    }));
+
+                    console.log(`✅ [ORDER EXECUTED] ${signal} ${pair} - Order ID: ${orderId}, Entry: ${filledPrice}`);
+                } catch (error: any) {
+                    console.error('❌ [ORDER EXECUTION ERROR]:', error.response?.data || error.message);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: false,
+                        error: 'Order execution failed',
+                        details: error.response?.data || error.message
+                    }));
+                }
+            });
+            return;
+        }
+
+        // 6. FEAR AND GREED PROXY (NEW)
         if (parsedUrl.pathname === '/fng') {
             console.log(`[PROXY] Fetching Fear & Greed Index...`);
             try {
