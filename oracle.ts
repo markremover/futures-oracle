@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import http from 'http';
 import url from 'url';
 import axios from 'axios';
+import crypto from 'crypto';
 // import yahooFinance from 'yahoo-finance2'; // DEPRECATED
 
 // --- CONFIGURATION ---
@@ -11,6 +12,11 @@ const TARGET_PAIRS = ["ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "SUI-USD"];
 const STOCK_WATCHLIST = ['QQQ', 'NVDA', 'AAPL', 'MSTR', 'COIN', '^TNX', 'DX-Y.NYB']; // Stocks, US10Y, DXY
 const N8N_WEBHOOK_BASE = 'http://172.17.0.1:5678/webhook/futurec-trigger-'; // Base URL (Docker Gateway)
 
+// --- COINBASE API ---
+const COINBASE_API_URL = 'https://api.coinbase.com/api/v3/brokerage';
+const COINBASE_API_KEY = process.env.COINBASE_API_KEY || '';
+const COINBASE_API_SECRET = process.env.COINBASE_API_SECRET || '';
+
 // --- STATE ---
 const prices: Map<string, number> = new Map();
 let wsConnected = false;
@@ -19,6 +25,12 @@ let macroCache: any[] | null = null;
 let lastMacroUpdate = 0;
 let stockCache: any = null;
 let lastStockUpdate = 0;
+
+// --- ACCOUNT DATA CACHE (V20) ---
+let accountBalance: number = 0;
+let leverageCache: Map<string, number> = new Map(); // pair -> max leverage
+let lastAccountUpdate = 0;
+const ACCOUNT_CACHE_MS = 30000; // 30 seconds
 
 // --- PRICE MONITOR (AUTONOMOUS AGENT) ---
 class PriceMonitor {
@@ -96,7 +108,7 @@ class PriceMonitor {
         try {
             const endTime = Math.floor(Date.now() / 1000);
             const startTime = endTime - (granularity * count);
-            
+
             const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
                 params: {
                     start: startTime,
@@ -106,7 +118,7 @@ class PriceMonitor {
             });
 
             if (!response.data || !Array.isArray(response.data)) return null;
-            
+
             // Coinbase returns [time, low, high, open, close, volume]
             // We need close prices (index 4)
             return response.data.map((candle: any) => candle[4]);
@@ -132,7 +144,7 @@ class PriceMonitor {
 
         // For now, we don't block SHORT signals (Oracle doesn't generate them yet)
         // Future: Block SHORT in uptrend (price > SMA200)
-        
+
         return null; // Signal allowed
     }
 
@@ -151,7 +163,7 @@ class PriceMonitor {
         // TREND PROTECTION: Check SMA200 before sending signal
         console.log(`🔍 [TREND CHECK] Analyzing ${pair} trend before signal...`);
         const trendData = await this.getTrendData(pair);
-        
+
         if (!trendData) {
             console.log(`⚠️  [TREND WARNING] Could not fetch trend data for ${pair} - BLOCKING signal as safety measure`);
             return;
@@ -198,6 +210,107 @@ interface TradeLog {
 
 let dailyTrades: TradeLog[] = [];
 let currentDay = new Date().toISOString().split('T')[0];
+
+// --- COINBASE API HELPERS (V20) ---
+
+/**
+ * Generate JWT token for Coinbase Advanced Trade API v3
+ */
+function generateCoinbaseJWT(method: string, path: string): string {
+    if (!COINBASE_API_KEY || !COINBASE_API_SECRET) {
+        throw new Error('Coinbase API credentials not set');
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const payload = {
+        iss: 'coinbase-cloud',
+        nbf: timestamp,
+        exp: timestamp + 120, // 2 min expiry
+        sub: COINBASE_API_KEY,
+        iat: timestamp
+    };
+
+    const header = { alg: 'ES256', kid: COINBASE_API_KEY, typ: 'JWT' };
+
+    const token = Buffer.from(JSON.stringify(header)).toString('base64url') + '.' +
+        Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+    const signature = crypto
+        .createSign('SHA256')
+        .update(token)
+        .sign(COINBASE_API_SECRET, 'base64url');
+
+    return token + '.' + signature;
+}
+
+/**
+ * Fetch available balance from Coinbase
+ */
+async function fetchAccountBalance(): Promise<number> {
+    try {
+        const path = '/accounts';
+        const jwt = generateCoinbaseJWT('GET', path);
+
+        const response = await axios.get(`${COINBASE_API_URL}${path}`, {
+            headers: {
+                'Authorization': `Bearer ${jwt}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        // Find USDC account (futures use USDC margin)
+        const usdcAccount = response.data.accounts?.find((acc: any) => acc.currency === 'USDC');
+        return parseFloat(usdcAccount?.available_balance?.value || '0');
+    } catch (e: any) {
+        console.error('❌ [COINBASE API] Failed to fetch balance:', e.message);
+        return 0;
+    }
+}
+
+/**
+ * Fetch max leverage for a specific pair
+ */
+async function fetchMaxLeverage(pair: string): Promise<number> {
+    try {
+        const productId = `${pair}-PERP`;
+        const path = `/products/${productId}`;
+        const jwt = generateCoinbaseJWT('GET', path);
+
+        const response = await axios.get(`${COINBASE_API_URL}${path}`, {
+            headers: {
+                'Authorization': `Bearer ${jwt}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        return parseFloat(response.data.fcm_trading_session_details?.max_leverage || '1');
+    } catch (e: any) {
+        console.error(`❌ [COINBASE API] Failed to fetch leverage for ${pair}:`, e.message);
+        return 1; // Default to 1x if error
+    }
+}
+
+/**
+ * Update account data cache (balance + leverage for all pairs)
+ */
+async function refreshAccountData(): Promise<void> {
+    const now = Date.now();
+    if (now - lastAccountUpdate < ACCOUNT_CACHE_MS) {
+        return; // Use cache
+    }
+
+    console.log('🔄 [ACCOUNT SYNC] Refreshing balance and leverage...');
+
+    accountBalance = await fetchAccountBalance();
+
+    for (const pair of TARGET_PAIRS) {
+        const leverage = await fetchMaxLeverage(pair);
+        leverageCache.set(pair, leverage);
+    }
+
+    lastAccountUpdate = now;
+    console.log(`✅ [ACCOUNT SYNC] Balance: $${accountBalance.toFixed(2)}, Leverage: ${Array.from(leverageCache.entries()).map(([p, l]) => `${p.split('-')[0]}:${l}x`).join(', ')}`);
+}
 
 // --- SERVER ---
 function startServer() {
@@ -283,7 +396,114 @@ function startServer() {
             return;
         }
 
-        // 3. FEAR AND GREED PROXY (NEW)
+        // 3. ACCOUNT INFO (V20 - AUTONOMOUS TRADING)
+        if (parsedUrl.pathname === '/account-info') {
+            try {
+                await refreshAccountData(); // Refresh cache if needed
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    balance: accountBalance,
+                    leverage: Object.fromEntries(leverageCache),
+                    last_updated: lastAccountUpdate,
+                    timestamp: Date.now()
+                }));
+                console.log(`[ACCOUNT INFO] Balance: $${accountBalance.toFixed(2)}`);
+            } catch (error: any) {
+                console.error('[ACCOUNT INFO ERROR]:', error.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    error: 'Failed to fetch account data',
+                    details: error.message
+                }));
+            }
+            return;
+        }
+
+        // 4. CALCULATE POSITION SIZE (V20)
+        if (req.method === 'POST' && parsedUrl.pathname === '/calculate-position') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body);
+                    const { pair, entry_price, sl_price, tp_price, risk_amount = 10, tp_amount = 20 } = data;
+
+                    if (!pair || !entry_price || !sl_price || !tp_price) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Missing required fields: pair, entry_price, sl_price, tp_price' }));
+                        return;
+                    }
+
+                    // Refresh account data
+                    await refreshAccountData();
+
+                    const leverage = leverageCache.get(pair) || 1;
+                    const balance = accountBalance;
+
+                    // Calculate position size based on SL risk
+                    const slDistance = Math.abs(entry_price - sl_price);
+                    if (slDistance === 0) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'SL price must be different from entry price' }));
+                        return;
+                    }
+
+                    const contracts = risk_amount / slDistance; // Risk $10 on SL
+                    const notional = contracts * entry_price;
+                    const marginRequired = notional / leverage;
+
+                    // Safety check: use only 95% of available balance
+                    const safeMarginLimit = balance * 0.95;
+                    if (marginRequired > safeMarginLimit) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            allowed: false,
+                            reason: 'Insufficient margin',
+                            margin_required: marginRequired.toFixed(2),
+                            margin_available: safeMarginLimit.toFixed(2)
+                        }));
+                        return;
+                    }
+
+                    // Min notional check (Coinbase requirement)
+                    if (notional < 10) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            allowed: false,
+                            reason: 'Below minimum notional',
+                            notional: notional.toFixed(2),
+                            minimum: 10
+                        }));
+                        return;
+                    }
+
+                    // Success - return position details
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        allowed: true,
+                        pair,
+                        contracts: contracts.toFixed(4),
+                        notional: notional.toFixed(2),
+                        margin_required: marginRequired.toFixed(2),
+                        leverage: leverage,
+                        entry_price: entry_price,
+                        sl_price: sl_price,
+                        tp_price: tp_price,
+                        risk_amount: risk_amount,
+                        tp_amount: tp_amount
+                    }));
+                    console.log(`[POSITION CALC] ${pair}: ${contracts.toFixed(4)} contracts, margin: $${marginRequired.toFixed(2)}`);
+                } catch (error: any) {
+                    console.error('[POSITION CALC ERROR]:', error.message);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Calculation failed', details: error.message }));
+                }
+            });
+            return;
+        }
+
+        // 5. FEAR AND GREED PROXY (NEW)
         if (parsedUrl.pathname === '/fng') {
             console.log(`[PROXY] Fetching Fear & Greed Index...`);
             try {
