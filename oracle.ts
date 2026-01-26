@@ -72,13 +72,98 @@ class PriceMonitor {
         }
     }
 
+    private async getTrendData(pair: string): Promise<{ sma200_1h: number, sma200_4h: number, currentPrice: number } | null> {
+        try {
+            // Fetch 1h candles (last 200 hours = ~8 days)
+            const candles1h = await this.fetchCandles(pair, 3600, 200);
+            // Fetch 4h candles (last 800 hours = ~33 days)
+            const candles4h = await this.fetchCandles(pair, 14400, 200);
+
+            if (!candles1h || !candles4h) return null;
+
+            const sma200_1h = this.calculateSMA(candles1h, 200);
+            const sma200_4h = this.calculateSMA(candles4h, 200);
+            const currentPrice = prices.get(pair) || 0;
+
+            return { sma200_1h, sma200_4h, currentPrice };
+        } catch (e: any) {
+            console.error(`❌ [TREND ERROR] Failed to fetch trend data for ${pair}:`, e.message);
+            return null;
+        }
+    }
+
+    private async fetchCandles(pair: string, granularity: number, count: number): Promise<number[] | null> {
+        try {
+            const endTime = Math.floor(Date.now() / 1000);
+            const startTime = endTime - (granularity * count);
+            
+            const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
+                params: {
+                    start: startTime,
+                    end: endTime,
+                    granularity
+                }
+            });
+
+            if (!response.data || !Array.isArray(response.data)) return null;
+            
+            // Coinbase returns [time, low, high, open, close, volume]
+            // We need close prices (index 4)
+            return response.data.map((candle: any) => candle[4]);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private calculateSMA(prices: number[], period: number): number {
+        if (prices.length < period) return prices[prices.length - 1] || 0;
+        const slice = prices.slice(-period);
+        const sum = slice.reduce((a, b) => a + b, 0);
+        return sum / period;
+    }
+
+    private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number }): string | null {
+        const { sma200_1h, sma200_4h, currentPrice } = trendData;
+
+        // Block LONG signals in downtrend (price below SMA200 on both timeframes)
+        if (currentPrice < sma200_1h && currentPrice < sma200_4h) {
+            return `DOWNTREND: Price ${currentPrice.toFixed(2)} < SMA200_1h ${sma200_1h.toFixed(2)} & SMA200_4h ${sma200_4h.toFixed(2)}`;
+        }
+
+        // For now, we don't block SHORT signals (Oracle doesn't generate them yet)
+        // Future: Block SHORT in uptrend (price > SMA200)
+        
+        return null; // Signal allowed
+    }
+
     private async triggerAlert(pair: string, type: string, value: number) {
         const now = Date.now();
         const last = this.lastAlert.get(pair) || 0;
 
-        // Debounce: 1 alert per 15 mins for same pair
-        if (now - last < 900000) return;
+        // Extended cooldown: 3 hours instead of 15 mins to prevent spam during crashes
+        const COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
+        if (now - last < COOLDOWN_MS) {
+            const remainingMin = Math.floor((COOLDOWN_MS - (now - last)) / 60000);
+            console.log(`⏸️  [COOLDOWN] ${pair} blocked - ${remainingMin}min remaining`);
+            return;
+        }
 
+        // TREND PROTECTION: Check SMA200 before sending signal
+        console.log(`🔍 [TREND CHECK] Analyzing ${pair} trend before signal...`);
+        const trendData = await this.getTrendData(pair);
+        
+        if (!trendData) {
+            console.log(`⚠️  [TREND WARNING] Could not fetch trend data for ${pair} - BLOCKING signal as safety measure`);
+            return;
+        }
+
+        const blockReason = this.shouldBlockSignal(pair, trendData);
+        if (blockReason) {
+            console.log(`🚫 [BLOCKED] ${pair} signal blocked: ${blockReason}`);
+            return;
+        }
+
+        console.log(`✅ [TREND OK] ${pair} passed trend check - Price: ${trendData.currentPrice.toFixed(2)}, SMA200_1h: ${trendData.sma200_1h.toFixed(2)}, SMA200_4h: ${trendData.sma200_4h.toFixed(2)}`);
         console.log(`🚀 [ALERT] ${pair} triggered ${type}: ${value.toFixed(2)}% (Threshold checked)`);
         this.lastAlert.set(pair, now);
 
