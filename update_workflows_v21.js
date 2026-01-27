@@ -55,20 +55,24 @@ workflowFiles.forEach(filename => {
             if (node.name === 'Telegram' || node.name?.includes('Report')) {
                 console.log(`  📱 Found Telegram node: ${node.name}`);
 
-                // Update message template with V21 fields
-                const newMessage = '🚀 **{{ $json.side }} {{ $json.pair }}**\n\n' +
-                    '📊 **Entry:** ${{ $json.entry_price }}\n' +
-                    '🛑 **SL:** ${{ $json.sl_price }}\n' +
-                    '🎯 **TP:** ${{ $json.tp_price }}\n\n' +
-                    '📈 **ATR:** {{ $json.atr }}\n' +
-                    '📦 **Contracts:** {{ $json.contracts }}\n' +
-                    '💰 **Risk:** ${{ $json.actual_risk }}\n' +
-                    '💵 **Margin:** ${{ $json.margin_used }}\n\n' +
+                // Update message template with V21 + GHOST SNIPER fields
+                const newMessage =
+                    '{{ $json.mode === "SIMULATION" ? "🎮 [SIMULATION MODE]" : "💵 [LIVE TRADING]" }}\\n' +
+                    '🚀 **{{ $json.side }} {{ $json.pair }}**\\n\\n' +
+                    '📊 **Entry:** ${{ $json.entry_price }}\\n' +
+                    '🛑 **SL:** ${{ $json.sl_price }}\\n' +
+                    '🎯 **TP:** ${{ $json.tp_price }}\\n\\n' +
+                    '📈 **ATR:** {{ $json.atr }}\\n' +
+                    '📦 **Contracts:** {{ $json.contracts }}\\n' +
+                    '💰 **Risk:** ${{ $json.actual_risk }}\\n' +
+                    '💵 **Margin:** ${{ $json.margin_used }}\\n' +
+                    '⚡ **Leverage:** {{ $json.leverage }}x\\n\\n' +
+                    '{{ $json.mode === "SIMULATION" ? "🎮 **Virtual Balance:** $" + $json.sim_balance + "\\n\\n" : "" }}' +
                     '🆔 Order ID: `{{ $json.order_id }}`';
 
                 if (node.parameters.message) {
                     node.parameters.message = newMessage;
-                    console.log(`  ✅ Updated Telegram message template with V21 fields`);
+                    console.log(`  ✅ Updated Telegram message template with Ghost Sniper fields`);
                     updated = true;
                 }
             }

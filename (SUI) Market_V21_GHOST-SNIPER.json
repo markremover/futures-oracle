@@ -1,0 +1,411 @@
+{
+  "name": "(SUI) Market_V10_MACRO",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/candles",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "granularity",
+              "value": "3600"
+            },
+            {
+              "name": "limit",
+              "value": "300"
+            },
+            {
+              "name": "pair",
+              "value": "SUI-PERP"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        464,
+        400
+      ],
+      "id": "68974fd3-adf5-4eab-bd44-71cc5a1fed05",
+      "name": "Historical Candles"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pair",
+              "value": "SUI-PERP"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        400
+      ],
+      "id": "97a53ff3-2e17-4193-924d-4654f3c8faab",
+      "name": "Current_Price",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "futurec-trigger-sui",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        272,
+        400
+      ],
+      "name": "Webhook",
+      "id": "715d39fb-5e0f-4b55-a72e-1f6f9d9314a4",
+      "webhookId": "b8d2399f-eeda-4278-a3b7-2d0eec6b09a7"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/fng",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        944,
+        400
+      ],
+      "id": "47c13162-64fa-415c-9ffd-6a678ffc04f2",
+      "name": "F&G Index"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/news",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1136,
+        400
+      ],
+      "id": "1c308426-038b-4b1c-9506-26d9388a9576",
+      "name": "News/Sentiment"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/macro",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1328,
+        400
+      ],
+      "id": "c8ab034a-335f-46e0-9817-c4b659d1e0b3",
+      "name": "Macro Calendar"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e62c9875-529b-4f6c-aca6-aff55fd9d7c5",
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 74,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "4d72f026-ed60-434b-ba1d-18367fbc9207",
+              "leftValue": "={{ $json.final_signal }}",
+              "rightValue": "BUY|SELL",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        608
+      ],
+      "id": "36cb96c5-fc11-4fc3-a545-4a4910670c93",
+      "name": "Risk Filter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst PERIOD = 14;\nconst ATR_MAX_THRESHOLD = 0.01; \nconst RSI_NEUTRAL_MIN = 48;\nconst RSI_NEUTRAL_MAX = 52;\n\n// --- GET DATA FROM CANDLES ---\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\n// --- GET ORIGINAL WEBHOOK DATA (Pass-Through) ---\n// Fix: Grab data from Webhook to ensure trend/status aren't lost in Test Mode\nlet webhookData = {};\ntry {\n    webhookData = $('Webhook').first().json;\n} catch (e) {}\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    // Index 0 is the most recent candle in Coinbase API\n    const lastCandle = candleData[0]; \n    // Support both Finnhub {c:[]} and Coinbase [[t,l,h,o,c,v]] formats\n    if (Array.isArray(lastCandle)) {\n        current_price = parseFloat(lastCandle[4]); // Coinbase\n    } else {\n        current_price = parseFloat(lastCandle['c'] || 0); // Flat object fallback\n    }\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\n// --- PARSE CANDLES FOR CALCULATION ---\n// Handle Coinbase Format [[time, low, high, open, close, vol], ...]\nconst candles = candleData.map(c => ({\n    close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c['4'] || c.close || 0),\n    high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c['2'] || c.high || 0),\n    low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c['1'] || c.low || 0)\n}));\n\n// --- CALCULATION FUNCTIONS ---\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    ...webhookData, // <--- CRITICAL FIX: Pass through original fields (trend, etc.)\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        400
+      ],
+      "id": "033969f6-93df-4c28-92c2-de0370de365e",
+      "name": "Code/Function (ATR/RSI Filter)"
+    },
+    {
+      "parameters": {
+        "chatId": "5687487073",
+        "text": "={{ $json.success ? '✅ ORDER EXECUTED' : '❌ ORDER FAILED' }}\\n\\nPair: {{ $json.pair || 'ETH-USD' }}\\nSignal: {{ $json.signal || $json.final_signal }}\\nEntry: {{ $json.entry_price }}\\nOrder ID: {{ $json.order_id }}\\nContracts: {{ $json.contracts }}\\nSL: {{ $json.sl_price }} | TP: {{ $json.tp_price }}\\nMargin Used: ${{ $json.margin_used }}\\n\\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{ $json.confidence_score || $json.confidence }}%",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1104,
+        592
+      ],
+      "id": "a8f16171-9588-4000-bd20-d55a9b6950e4",
+      "name": "Telegram (Report)",
+      "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
+      "credentials": {
+        "telegramApi": {
+          "id": "2HnE4TLrYpz4Yd6o",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Universal Parser V2\nconst aiResponse = items[0].json;\nconst livePrice = parseFloat($items(\"Code/Function (ATR/RSI Filter)\")[0].json.current_price || 0);\n\n// Ensure confidence score lands in the correct variable\nconst signal = aiResponse.signal || \"WAIT\";\n// Fix: Gemini can send 'confidence' OR 'confidence_score' - handle both\nconst conf = aiResponse.confidence || aiResponse.confidence_score || 0;\n\nreturn {\n    json: {\n        ...aiResponse,\n        final_signal: signal,\n        current_price: livePrice,\n        confidence_score: conf // Use 'conf' so Risk Filter always sees a number\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        608
+      ],
+      "id": "f6d2f770-8806-4c83-9be9-07ec81af4d6c",
+      "name": "Parser"
+    },
+    {
+      "parameters": {
+        "url": "http://172.17.0.1:3001/market-context",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1520,
+        400
+      ],
+      "id": "6227e404-aa6f-4219-b81f-6e0ec64309f3",
+      "name": "Market Context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/analyze",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyD4bQ1aUJwlYmiN7ihXfdbE6oj2iHpSXOc\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1712,
+        400
+      ],
+      "id": "a1072214-b1a7-4773-9494-a1bef9de5a9d",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/execute-order",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pair\": \"SUI-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        704,
+        592
+      ],
+      "id": "execute-order-sui-1769394496458",
+      "name": "Execute Order (Oracle API)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Historical Candles": {
+      "main": [
+        [
+          {
+            "node": "Current_Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current_Price": {
+      "main": [
+        [
+          {
+            "node": "Code/Function (ATR/RSI Filter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "F&G Index": {
+      "main": [
+        [
+          {
+            "node": "News/Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News/Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Macro Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Macro Calendar": {
+      "main": [
+        [
+          {
+            "node": "Market Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk Filter": {
+      "main": [
+        [
+          {
+            "node": "Execute Order (Oracle API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code/Function (ATR/RSI Filter)": {
+      "main": [
+        [
+          {
+            "node": "F&G Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parser": {
+      "main": [
+        [
+          {
+            "node": "Risk Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Historical Candles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Order (Oracle API)": {
+      "main": [
+        [
+          {
+            "node": "Telegram (Report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "0a36135e-44bb-4018-b73c-58302b3abe29",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dbc77a83d2b4b81619f9b25f03d3eb04bad62bf94cb1838a3d14a7b99cb0d36c"
+  },
+  "id": "gs2x34iDZ5asJwgF",
+  "tags": []
+}
