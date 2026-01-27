@@ -1302,36 +1302,9 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
             return;
         }
 
-        // 8. TRADE LOGGER (POST /log-trade)
-        if (req.method === 'POST' && parsedUrl.pathname === '/log-trade') {
-            let body = '';
-            req.on('data', chunk => { body += chunk.toString(); });
-            req.on('end', () => {
-                try {
-                    const data = JSON.parse(body);
-                    const trade: TradeLog = {
-                        pair: data.pair || 'UNKNOWN',
-                        type: data.pnl >= 0 ? 'WIN' : 'LOSS',
-                        pnl: parseFloat(data.pnl),
-                        price: parseFloat(data.price),
-                        time: new Date().toLocaleTimeString()
-                    };
-
-                    dailyTrades.push(trade);
-                    console.log(`📝 [LOG] ${trade.time} | ${trade.pair} | ${trade.type} | ${trade.pnl}%`);
-
-                    res.writeHead(200);
-                    res.end(JSON.stringify({ status: 'Logged' }));
-                } catch (e) {
-                    res.writeHead(400);
-                    res.end(JSON.stringify({ error: 'Invalid JSON' }));
-                }
-            });
-            return;
-        }
 
         res.writeHead(200);
-        res.end("Futures Oracle Running (V12 - Autonomous). Endpoints: GET /price, POST /log-trade, /market-context");
+        res.end("Futures Oracle Running (V12 - Autonomous). Endpoints: GET /price, /market-context");
     });
 
     server.listen(PORT, () => {
