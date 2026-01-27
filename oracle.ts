@@ -5,19 +5,33 @@ import axios from 'axios';
 import crypto from 'crypto';
 // import yahooFinance from 'yahoo-finance2'; // DEPRECATED
 
-// --- CONFIGURATION ---
-const WS_URL = 'wss://advanced-trade-ws.coinbase.com';
+// --- CONFIG ---
 const PORT = 3001;
-const TARGET_PAIRS = ["ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "SUI-USD"];
+const WS_URL = 'wss://advanced-trade-ws.coinbase.com';
+const TARGET_PAIRS = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'SUI-USD'];
+const N8N_WEBHOOK_BASE = 'http://n8n:5678/webhook';
 const STOCK_WATCHLIST = ['QQQ', 'NVDA', 'AAPL', 'MSTR', 'COIN', '^TNX', 'DX-Y.NYB']; // Stocks, US10Y, DXY
-const N8N_WEBHOOK_BASE = 'http://172.17.0.1:5678/webhook/futurec-trigger-'; // Base URL (Docker Gateway)
 
 // --- COINBASE API ---
 const COINBASE_API_URL = 'https://api.coinbase.com/api/v3/brokerage';
 const COINBASE_API_KEY = process.env.COINBASE_API_KEY || '';
 const COINBASE_API_SECRET = process.env.COINBASE_API_SECRET || '';
 
+// --- GHOST SNIPER SIMULATION MODE (V21) ---
+// Detect simulation mode (no API keys = virtual trading)
+const SIMULATION_MODE = !COINBASE_API_KEY || !COINBASE_API_SECRET;
+const SIM_BALANCE = 1400; // Virtual capital for testing
+let simBalance = SIM_BALANCE; // Current virtual balance
+
+if (SIMULATION_MODE) {
+    console.log('\n🎮 [GHOST SNIPER] Simulation Mode Active');
+    console.log(`💰 Virtual Capital: $${SIM_BALANCE}`);
+    console.log('📊 Using REAL market data with VIRTUAL execution\n');
+}
+
 // --- STATE ---
+let ws: any = null;
+let reconnectAttempt = 0;
 const prices: Map<string, number> = new Map();
 let wsConnected = false;
 let lastWsUpdate = 0;
@@ -40,6 +54,10 @@ interface ActivePosition {
     entryPrice: number;
     contracts: number;
     timestamp: number;
+    slPrice?: number; // Ghost Sniper: track SL
+    tpPrice?: number; // Ghost Sniper: track TP
+    isSimulated?: boolean; // Ghost Sniper: virtual position marker
+    unrealizedPnl?: number; // Ghost Sniper: current PnL
 }
 
 interface TradeHistory {
@@ -58,6 +76,10 @@ const COOLDOWN_AFTER_SL_MS = 3 * 60 * 60 * 1000; // 3 hours
 // SNIPER MODE: Two-chances rule (max 2 trades per coin per 24h)
 let dailyTrades: TradeHistory[] = [];
 const MAX_TRADES_PER_COIN_24H = 2;
+
+// GHOST SNIPER: Virtual position monitoring
+let virtualPositions: ActivePosition[] = []; // Separate tracking for sim mode
+let totalVirtualPnl = 0; // Track cumulative virtual profit/loss
 
 // --- PRICE MONITOR (AUTONOMOUS AGENT) ---
 class PriceMonitor {
@@ -319,6 +341,18 @@ async function refreshAccountData(): Promise<void> {
 
     console.log('🔄 [ACCOUNT SYNC] Refreshing balance and leverage...');
 
+    // GHOST SNIPER: Use virtual balance in simulation mode
+    if (SIMULATION_MODE) {
+        accountBalance = simBalance;
+        // Set default leverage for all pairs (5x is common for perps)
+        for (const pair of TARGET_PAIRS) {
+            leverageCache.set(pair, 5); // Virtual 5x leverage
+        }
+        lastAccountUpdate = now;
+        console.log(`🎮 [SIM MODE] Virtual Balance: $${simBalance.toFixed(2)}, Leverage: 5x`);
+        return;
+    }
+
     accountBalance = await fetchAccountBalance();
 
     for (const pair of TARGET_PAIRS) {
@@ -518,6 +552,42 @@ function canOpenNewPosition(pair: string): { allowed: boolean, reason?: string }
 
     return { allowed: true };
 }
+
+// --- GHOST SNIPER: VIRTUAL POSITION MONITOR ---
+
+function monitorVirtualPositions() {
+    if (!SIMULATION_MODE || virtualPositions.length === 0) return;
+
+    virtualPositions.forEach((pos, index) => {
+        const currentPrice = prices.get(pos.pair);
+        if (!currentPrice) return;
+
+        const priceDiff = pos.side === 'BUY' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
+        pos.unrealizedPnl = priceDiff * pos.contracts;
+
+        const slHit = pos.side === 'BUY' ? currentPrice <= (pos.slPrice || 0) : currentPrice >= (pos.slPrice || 0);
+        const tpHit = pos.side === 'BUY' ? currentPrice >= (pos.tpPrice || 999999) : currentPrice <= (pos.tpPrice || 0);
+
+        if (slHit) {
+            const slPnl = ((pos.slPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
+            simBalance += Math.abs(slPnl);
+            totalVirtualPnl += slPnl;
+            console.log(`🛑 [SIM] SL HIT: ${pos.pair} @ $${currentPrice.toFixed(2)} | PnL: $${slPnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
+            virtualPositions.splice(index, 1);
+            updateTradeResult(pos.pair, 'LOSS', slPnl);
+            slCooldowns.set(pos.pair, Date.now());
+        } else if (tpHit) {
+            const tpPnl = ((pos.tpPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
+            simBalance += Math.abs(tpPnl);
+            totalVirtualPnl += tpPnl;
+            console.log(`🎯 [SIM] TP HIT: ${pos.pair} @ $${currentPrice.toFixed(2)} | PnL: $${tpPnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
+            virtualPositions.splice(index, 1);
+            updateTradeResult(pos.pair, 'WIN', tpPnl);
+        }
+    });
+}
+
+setInterval(monitorVirtualPositions, 5000);
 
 /**
  * Add position to portfolio tracking
@@ -889,50 +959,86 @@ function startServer() {
                         return;
                     }
 
-                    // === STEP 7: SEND MARKET ORDER WITH BRACKET TP/SL ===
+                    // === STEP 7: SEND MARKET ORDER (REAL OR SIMULATED) ===
                     const productId = `${pair}-PERP`;
                     const clientOrderId = `v21-${Date.now()}-${pair}`;
+                    let orderId = clientOrderId;
+                    let filledPrice = currentPrice;
 
-                    const orderPayload = {
-                        client_order_id: clientOrderId,
-                        product_id: productId,
-                        side: side,
-                        order_configuration: {
-                            market_market_fok: {
-                                quote_size: notional.toFixed(2)
-                            }
-                        },
-                        attached_order_configuration: {
-                            trigger_bracket_gtc: {
-                                stop_trigger_price: slPrice.toFixed(2),
-                                limit_price_stop: slPrice.toFixed(2),
-                                limit_price_take_profit: tpPrice.toFixed(2)
-                            }
-                        }
-                    };
+                    // GHOST SNIPER: Simulate order execution if no API keys
+                    if (SIMULATION_MODE) {
+                        console.log(`🎮 [SIM MODE] Simulating ${side} order: ${contracts} contracts @ $${currentPrice.toFixed(2)}`);
 
-                    const path = '/orders';
-                    const jwt = generateCoinbaseJWT('POST', path);
+                        // Virtual order "executed" instantly at current market price
+                        orderId = `SIM-${Date.now()}`;
+                        filledPrice = currentPrice;
 
-                    console.log(`\ud83d\udce4 [COINBASE] Sending ${side} order: ${contracts} contracts @ $${currentPrice.toFixed(2)}`);
+                        // Update virtual balance (deduct margin used)
+                        simBalance -= marginRequired;
 
-                    const response = await axios.post(
-                        `${COINBASE_API_URL}${path}`,
-                        orderPayload,
-                        {
-                            headers: {
-                                'Authorization': `Bearer ${jwt}`,
-                                'Content-Type': 'application/json'
+                        console.log(`💰 [SIM BALANCE] $${simBalance.toFixed(2)} (used $${marginRequired.toFixed(2)} margin)`);
+                    } else {
+                        // REAL MODE: Send order to Coinbase
+                        const orderPayload = {
+                            client_order_id: clientOrderId,
+                            product_id: productId,
+                            side: side,
+                            order_configuration: {
+                                market_market_fok: {
+                                    quote_size: notional.toFixed(2)
+                                }
                             },
-                            timeout: 10000
-                        }
-                    );
+                            attached_order_configuration: {
+                                trigger_bracket_gtc: {
+                                    stop_trigger_price: slPrice.toFixed(2),
+                                    limit_price_stop: slPrice.toFixed(2),
+                                    limit_price_take_profit: tpPrice.toFixed(2)
+                                }
+                            }
+                        };
+
+                        const path = '/orders';
+                        const jwt = generateCoinbaseJWT('POST', path);
+
+                        console.log(`📤 [COINBASE] Sending ${side} order: ${contracts} contracts @ $${currentPrice.toFixed(2)}`);
+
+                        const response = await axios.post(
+                            `${COINBASE_API_URL}${path}`,
+                            orderPayload,
+                            {
+                                headers: {
+                                    'Authorization': `Bearer ${jwt}`,
+                                    'Content-Type': 'application/json'
+                                },
+                                timeout: 10000
+                            }
+                        );
+
+                        // Extract real order ID
+                        orderId = response.data.success_response?.order_id || response.data.order_id || 'UNKNOWN';
+                        filledPrice = parseFloat(response.data.success_response?.average_filled_price || currentPrice);
+                    }
 
                     // === STEP 8: TRACK POSITION ===
-                    const orderId = response.data.success_response?.order_id || response.data.order_id || 'UNKNOWN';
-                    const filledPrice = parseFloat(response.data.success_response?.average_filled_price || currentPrice);
+                    const position: ActivePosition = {
+                        pair,
+                        orderId,
+                        side: side as 'BUY' | 'SELL',
+                        entryPrice: filledPrice,
+                        contracts,
+                        timestamp: Date.now(),
+                        slPrice: parseFloat(slPrice.toFixed(2)),
+                        tpPrice: parseFloat(tpPrice.toFixed(2)),
+                        isSimulated: SIMULATION_MODE,
+                        unrealizedPnl: 0
+                    };
 
-                    addPosition(pair, orderId, side as 'BUY' | 'SELL', filledPrice, contracts);
+                    if (SIMULATION_MODE) {
+                        virtualPositions.push(position);
+                    } else {
+                        activePositions.push(position);
+                    }
+
                     recordTrade(pair, side as 'BUY' | 'SELL'); // Sniper Mode: Track for two-chances rule
 
                     // === SUCCESS RESPONSE ===
@@ -949,10 +1055,13 @@ function startServer() {
                         atr: parseFloat(atr.toFixed(2)),
                         actual_risk: parseFloat(actualRisk.toFixed(2)),
                         margin_used: parseFloat(marginRequired.toFixed(2)),
-                        leverage: leverage
+                        leverage: leverage,
+                        mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE', // Ghost Sniper indicator
+                        sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined
                     }));
 
-                    console.log(`\u2705 [V21 SUCCESS] ${side} ${pair} - Order: ${orderId}, Entry: ${filledPrice.toFixed(2)}, Risk: $${actualRisk.toFixed(2)}`);
+                    const modeTag = SIMULATION_MODE ? '🎮 [SIM]' : '💵 [LIVE]';
+                    console.log(`✅ [V21 SUCCESS] ${modeTag} ${side} ${pair} - Order: ${orderId}, Entry: ${filledPrice.toFixed(2)}, Risk: $${actualRisk.toFixed(2)}`);
                 } catch (error: any) {
                     console.error('\u274c [V21 EXECUTION ERROR]:', error.response?.data || error.message);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
