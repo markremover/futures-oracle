@@ -248,7 +248,7 @@
         "url": "http://172.17.0.1:3001/execute-order",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"SOL-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"entry_price\": {{ $json.current_price }},\n  \"sl_price\": {{ $json.current_price - 5 }},\n  \"tp_price\": {{ $json.current_price + 10 }},\n  \"risk_amount\": 10\n}",
+        "jsonBody": "={\n  \"pair\": \"SOL-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",

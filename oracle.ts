@@ -32,6 +32,33 @@ let leverageCache: Map<string, number> = new Map(); // pair -> max leverage
 let lastAccountUpdate = 0;
 const ACCOUNT_CACHE_MS = 30000; // 30 seconds
 
+// --- PORTFOLIO MANAGEMENT (V21) ---
+interface ActivePosition {
+    pair: string;
+    orderId: string;
+    side: 'BUY' | 'SELL';
+    entryPrice: number;
+    contracts: number;
+    timestamp: number;
+}
+
+interface TradeHistory {
+    pair: string;
+    timestamp: number;
+    side: 'BUY' | 'SELL';
+    result: 'PENDING' | 'WIN' | 'LOSS';
+    pnl?: number;
+}
+
+let activePositions: ActivePosition[] = [];
+const MAX_POSITIONS = 3; // SNIPER MODE: Allow 3 active positions
+let slCooldowns: Map<string, number> = new Map(); // pair -> timestamp of last SL hit
+const COOLDOWN_AFTER_SL_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+// SNIPER MODE: Two-chances rule (max 2 trades per coin per 24h)
+let dailyTrades: TradeHistory[] = [];
+const MAX_TRADES_PER_COIN_24H = 2;
+
 // --- PRICE MONITOR (AUTONOMOUS AGENT) ---
 class PriceMonitor {
     private history: Map<string, { time: number, price: number }[]> = new Map();
@@ -200,16 +227,7 @@ class PriceMonitor {
 
 const monitor = new PriceMonitor();
 
-interface TradeLog {
-    pair: string;
-    type: 'WIN' | 'LOSS';
-    pnl: number;
-    price: number;
-    time: string;
-}
 
-let dailyTrades: TradeLog[] = [];
-let currentDay = new Date().toISOString().split('T')[0];
 
 // --- COINBASE API HELPERS (V20) ---
 
@@ -310,6 +328,226 @@ async function refreshAccountData(): Promise<void> {
 
     lastAccountUpdate = now;
     console.log(`✅ [ACCOUNT SYNC] Balance: $${accountBalance.toFixed(2)}, Leverage: ${Array.from(leverageCache.entries()).map(([p, l]) => `${p.split('-')[0]}:${l}x`).join(', ')}`);
+}
+
+// --- V21 RECOVERY MODE: ATR & TREND FILTER ---
+
+/**
+ * Calculate Average True Range (ATR) from candles
+ * @param candles Array of [time, low, high, open, close, volume]
+ * @param period ATR period (default: 14)
+ */
+function calculateATR(candles: any[], period: number = 14): number {
+    if (candles.length < period + 1) return 0;
+
+    const trueRanges: number[] = [];
+
+    for (let i = 1; i < candles.length; i++) {
+        const prevCandle = candles[i - 1];
+        const currCandle = candles[i];
+
+        const prevLow = prevCandle[1];
+        const prevHigh = prevCandle[2];
+        const prevClose = prevCandle[4];
+        const currLow = currCandle[1];
+        const currHigh = currCandle[2];
+
+        const highLow = currHigh - currLow;
+        const highClosePrev = Math.abs(currHigh - prevClose);
+        const lowClosePrev = Math.abs(currLow - prevClose);
+
+        trueRanges.push(Math.max(highLow, highClosePrev, lowClosePrev));
+    }
+
+    // Take last 'period' values and average
+    const recentTR = trueRanges.slice(-period);
+    return recentTR.reduce((sum, tr) => sum + tr, 0) / period;
+}
+
+/**
+ * Fetch 1h candles for ATR and MA calculations
+ */
+async function fetchCandlesForATR(pair: string, count: number = 200): Promise<any[] | null> {
+    try {
+        const granularity = 3600; // 1 hour
+        const endTime = Math.floor(Date.now() / 1000);
+        const startTime = endTime - (granularity * count);
+
+        const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
+            params: { start: startTime, end: endTime, granularity },
+            timeout: 10000
+        });
+
+        return response.data || null;
+    } catch (e: any) {
+        console.error(`❌ [CANDLES] Failed to fetch for ${pair}:`, e.message);
+        return null;
+    }
+}
+
+/**
+ * Check if LONG signal should be blocked based on MA(200) 1h
+ * Priority #1: Prevent catching falling knives
+ */
+async function shouldBlockLong(pair: string): Promise<{ blocked: boolean, reason?: string }> {
+    try {
+        const candles = await fetchCandlesForATR(pair, 200);
+        if (!candles || candles.length < 200) {
+            return { blocked: true, reason: 'Insufficient candle data for MA200 check' };
+        }
+
+        // Calculate MA(200) from close prices (index 4)
+        const closePrices = candles.map((c: any) => c[4]);
+        const ma200 = closePrices.slice(-200).reduce((sum: number, p: number) => sum + p, 0) / 200;
+
+        const currentPrice = prices.get(pair) || closePrices[closePrices.length - 1];
+
+        if (currentPrice < ma200) {
+            return {
+                blocked: true,
+                reason: `Price ${currentPrice.toFixed(2)} < MA(200) ${ma200.toFixed(2)} - Downtrend`
+            };
+        }
+
+        console.log(`✅ [TREND OK] ${pair}: Price ${currentPrice.toFixed(2)} > MA(200) ${ma200.toFixed(2)}`);
+        return { blocked: false };
+    } catch (e: any) {
+        console.error(`❌ [TREND ERROR] ${pair}:`, e.message);
+        return { blocked: true, reason: 'Trend check failed - blocking as safety' };
+    }
+}
+
+// --- V21 SNIPER MODE: TWO-CHANCES RULE ---
+
+/**
+ * Clean up trade history older than 24 hours
+ */
+function cleanupOldTrades() {
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    dailyTrades = dailyTrades.filter(trade => (now - trade.timestamp) < TWENTY_FOUR_HOURS);
+}
+
+/**
+ * Record a new trade
+ */
+function recordTrade(pair: string, side: 'BUY' | 'SELL') {
+    cleanupOldTrades();
+    dailyTrades.push({
+        pair,
+        timestamp: Date.now(),
+        side,
+        result: 'PENDING'
+    });
+}
+
+/**
+ * Update trade result (called when position closes)
+ */
+function updateTradeResult(pair: string, result: 'WIN' | 'LOSS', pnl?: number) {
+    const recent = dailyTrades.filter(t => t.pair === pair && t.result === 'PENDING')
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+
+    if (recent) {
+        recent.result = result;
+        recent.pnl = pnl;
+        console.log(`📝 [TRADE RESULT] ${pair}: ${result}${pnl ? ` (${pnl.toFixed(2)}%)` : ''}`);
+    }
+}
+
+/**
+ * Check if pair can trade based on two-chances rule
+ */
+function canTradeToday(pair: string): { allowed: boolean, reason?: string } {
+    cleanupOldTrades();
+
+    const tradesLast24h = dailyTrades.filter(t => t.pair === pair);
+
+    if (tradesLast24h.length >= MAX_TRADES_PER_COIN_24H) {
+        return {
+            allowed: false,
+            reason: `Max ${MAX_TRADES_PER_COIN_24H} trades per 24h reached`
+        };
+    }
+
+    if (tradesLast24h.length === 1) {
+        const firstTrade = tradesLast24h[0];
+        if (firstTrade.result === 'LOSS') {
+            const timeSinceLoss = Date.now() - firstTrade.timestamp;
+            if (timeSinceLoss < COOLDOWN_AFTER_SL_MS) {
+                const remainingMin = Math.floor((COOLDOWN_AFTER_SL_MS - timeSinceLoss) / 60000);
+                return {
+                    allowed: false,
+                    reason: `Second chance requires 3h wait after first loss (${remainingMin}min remaining)`
+                };
+            }
+        }
+    }
+
+    return { allowed: true };
+}
+
+/**
+ * Check if new position can be opened (V21 Portfolio Management)
+ */
+function canOpenNewPosition(pair: string): { allowed: boolean, reason?: string } {
+    // Check two-chances rule first
+    const twoChancesCheck = canTradeToday(pair);
+    if (!twoChancesCheck.allowed) {
+        return twoChancesCheck;
+    }
+
+    // Check portfolio limit
+    if (activePositions.length >= MAX_POSITIONS) {
+        return {
+            allowed: false,
+            reason: `Portfolio full (${activePositions.length}/${MAX_POSITIONS} positions)`
+        };
+    }
+
+    // Check cooldown after SL hit
+    const lastSL = slCooldowns.get(pair) || 0;
+    const now = Date.now();
+    if (now - lastSL < COOLDOWN_AFTER_SL_MS) {
+        const remainingMin = Math.floor((COOLDOWN_AFTER_SL_MS - (now - lastSL)) / 60000);
+        return {
+            allowed: false,
+            reason: `Cooldown active: ${remainingMin}min remaining after SL`
+        };
+    }
+
+    return { allowed: true };
+}
+
+/**
+ * Add position to portfolio tracking
+ */
+function addPosition(pair: string, orderId: string, side: 'BUY' | 'SELL', entryPrice: number, contracts: number) {
+    activePositions.push({
+        pair,
+        orderId,
+        side,
+        entryPrice,
+        contracts,
+        timestamp: Date.now()
+    });
+    console.log(`➕ [PORTFOLIO] Added ${pair} position (${activePositions.length}/${MAX_POSITIONS})`);
+}
+
+/**
+ * Remove position from tracking (called when TP/SL is hit)
+ */
+function removePosition(orderId: string, hitSL: boolean = false) {
+    const pos = activePositions.find(p => p.orderId === orderId);
+    if (!pos) return;
+
+    if (hitSL) {
+        slCooldowns.set(pos.pair, Date.now());
+        console.log(`🔒 [COOLDOWN] ${pos.pair} blocked for 3 hours after SL hit`);
+    }
+
+    activePositions = activePositions.filter(p => p.orderId !== orderId);
+    console.log(`➖ [PORTFOLIO] Removed ${pos.pair} (${activePositions.length}/${MAX_POSITIONS} remaining)`);
 }
 
 // --- SERVER ---
@@ -503,34 +741,130 @@ function startServer() {
             return;
         }
 
-        // 5. EXECUTE ORDER (V20 - AUTONOMOUS TRADING)
+        // 5. EXECUTE ORDER (V21 - RECOVERY MODE WITH ATR + TREND FILTER)
         if (req.method === 'POST' && parsedUrl.pathname === '/execute-order') {
             let body = '';
             req.on('data', chunk => body += chunk);
             req.on('end', async () => {
                 try {
                     const data = JSON.parse(body);
-                    const { pair, signal, entry_price, sl_price, tp_price, risk_amount = 10 } = data;
+                    const { pair, signal, confidence } = data;
 
-                    if (!pair || !signal || !entry_price || !sl_price || !tp_price) {
+                    if (!pair || !signal) {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ error: 'Missing required fields: pair, signal, entry_price, sl_price, tp_price' }));
+                        res.end(JSON.stringify({ error: 'Missing required fields: pair, signal' }));
                         return;
                     }
 
-                    console.log(`🚀 [EXECUTE ORDER] ${signal} ${pair} @ ${entry_price}`);
+                    console.log(`\ud83d\ude80 [V21 EXECUTE] ${signal} ${pair} (Confidence: ${confidence || 'N/A'})`);
 
-                    // Step 1: Calculate position size
+                    // === STEP 1: MA(200) TREND FILTER (Priority #1) ===
+                    if (signal.toUpperCase() === 'BUY') {
+                        const trendCheck = await shouldBlockLong(pair);
+                        if (trendCheck.blocked) {
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({
+                                success: false,
+                                error: 'Trend filter block',
+                                reason: trendCheck.reason
+                            }));
+                            console.log(`\ud83d\udeab [TREND BLOCK] ${pair}: ${trendCheck.reason}`);
+                            return;
+                        }
+                    }
+
+                    // === STEP 2: PORTFOLIO LIMIT & COOLDOWN CHECK ===
+                    const portfolioCheck = canOpenNewPosition(pair);
+                    if (!portfolioCheck.allowed) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Portfolio restriction',
+                            reason: portfolioCheck.reason
+                        }));
+                        console.log(`\ud83d\udea7 [PORTFOLIO BLOCK] ${pair}: ${portfolioCheck.reason}`);
+                        return;
+                    }
+
+                    // === STEP 3: FETCH CANDLES & CALCULATE ATR ===
+                    const candles = await fetchCandlesForATR(pair, 50); // Need 50 candles for ATR-14
+                    if (!candles || candles.length < 15) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Failed to fetch candle data for ATR'
+                        }));
+                        console.log(`\u274c [ATR ERROR] ${pair}: Insufficient candle data`);
+                        return;
+                    }
+
+                    const atr = calculateATR(candles, 14);
+                    if (atr === 0) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Invalid ATR calculation'
+                        }));
+                        console.log(`\u274c [ATR ERROR] ${pair}: ATR = 0`);
+                        return;
+                    }
+
+                    // === STEP 4: CALCULATE SL/TP BASED ON ATR ===
+                    const currentPrice = prices.get(pair);
+                    if (!currentPrice) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Current price not available'
+                        }));
+                        console.log(`\u274c [PRICE ERROR] ${pair}: No price data`);
+                        return;
+                    }
+
+                    const slDistance = atr * 1.5; // 1.5x ATR for Stop Loss
+                    const tpDistance = atr * 3.0; // 3x ATR for Take Profit (1:2 R/R)
+
+                    const side = signal.toUpperCase(); // BUY or SELL
+                    const slPrice = side === 'BUY'
+                        ? currentPrice - slDistance
+                        : currentPrice + slDistance;
+                    const tpPrice = side === 'BUY'
+                        ? currentPrice + tpDistance
+                        : currentPrice - tpDistance;
+
+                    console.log(`\ud83d\udccf [ATR] ${pair}: ATR=${atr.toFixed(2)}, SL=${slPrice.toFixed(2)}, TP=${tpPrice.toFixed(2)}`);
+
+                    // === STEP 5: CALCULATE POSITION SIZE (INTEGER CONTRACTS) ===
                     await refreshAccountData();
                     const leverage = leverageCache.get(pair) || 1;
                     const balance = accountBalance;
 
-                    const slDistance = Math.abs(entry_price - sl_price);
-                    const contracts = risk_amount / slDistance;
-                    const notional = contracts * entry_price;
+                    const targetRisk = 10; // Fixed $10 risk per trade
+                    const riskPerContract = slDistance; // Risk per 1 unit of asset
+                    const rawContracts = targetRisk / riskPerContract;
+
+                    // CRITICAL: Round DOWN to integer (no decimals)
+                    const contracts = Math.floor(rawContracts);
+
+                    if (contracts < 1) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: 'Position size too small',
+                            reason: `Calculated ${rawContracts.toFixed(4)} contracts - minimum is 1`
+                        }));
+                        console.log(`\u274c [SIZE ERROR] ${pair}: ${rawContracts.toFixed(4)} contracts < 1`);
+                        return;
+                    }
+
+                    // Recalculate actual risk with integer contracts
+                    const actualRisk = contracts * riskPerContract;
+                    const notional = contracts * currentPrice;
                     const marginRequired = notional / leverage;
 
-                    // Validate margin
+                    console.log(`\ud83d\udcca [POSITION] ${pair}: ${contracts} contracts (actual risk: $${actualRisk.toFixed(2)})`);
+
+                    // === STEP 6: MARGIN VALIDATION ===
                     if (marginRequired > balance * 0.95) {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({
@@ -539,11 +873,11 @@ function startServer() {
                             margin_required: marginRequired.toFixed(2),
                             balance: balance.toFixed(2)
                         }));
-                        console.log(`❌ [ORDER BLOCKED] Insufficient margin for ${pair}`);
+                        console.log(`\u274c [MARGIN] ${pair}: Need $${marginRequired.toFixed(2)}, have $${balance.toFixed(2)}`);
                         return;
                     }
 
-                    // Validate min notional
+                    // Min notional check (Coinbase requirement)
                     if (notional < 10) {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({
@@ -551,14 +885,13 @@ function startServer() {
                             error: 'Below minimum notional',
                             notional: notional.toFixed(2)
                         }));
-                        console.log(`❌ [ORDER BLOCKED] Below min notional for ${pair}`);
+                        console.log(`\u274c [MIN NOTIONAL] ${pair}: $${notional.toFixed(2)} < $10`);
                         return;
                     }
 
-                    // Step 2: Send Market Order with Bracket TP/SL to Coinbase
+                    // === STEP 7: SEND MARKET ORDER WITH BRACKET TP/SL ===
                     const productId = `${pair}-PERP`;
-                    const side = signal.toUpperCase(); // BUY or SELL
-                    const clientOrderId = `oracle-${Date.now()}-${pair}`;
+                    const clientOrderId = `v21-${Date.now()}-${pair}`;
 
                     const orderPayload = {
                         client_order_id: clientOrderId,
@@ -571,9 +904,9 @@ function startServer() {
                         },
                         attached_order_configuration: {
                             trigger_bracket_gtc: {
-                                stop_trigger_price: sl_price.toString(),
-                                limit_price_stop: sl_price.toString(),
-                                limit_price_take_profit: tp_price.toString()
+                                stop_trigger_price: slPrice.toFixed(2),
+                                limit_price_stop: slPrice.toFixed(2),
+                                limit_price_take_profit: tpPrice.toFixed(2)
                             }
                         }
                     };
@@ -581,7 +914,7 @@ function startServer() {
                     const path = '/orders';
                     const jwt = generateCoinbaseJWT('POST', path);
 
-                    console.log(`📤 [COINBASE API] Sending bracket order: ${contracts.toFixed(4)} contracts, SL: ${sl_price}, TP: ${tp_price}`);
+                    console.log(`\ud83d\udce4 [COINBASE] Sending ${side} order: ${contracts} contracts @ $${currentPrice.toFixed(2)}`);
 
                     const response = await axios.post(
                         `${COINBASE_API_URL}${path}`,
@@ -595,26 +928,33 @@ function startServer() {
                         }
                     );
 
-                    // Success - return order details
+                    // === STEP 8: TRACK POSITION ===
                     const orderId = response.data.success_response?.order_id || response.data.order_id || 'UNKNOWN';
-                    const filledPrice = parseFloat(response.data.success_response?.average_filled_price || entry_price);
+                    const filledPrice = parseFloat(response.data.success_response?.average_filled_price || currentPrice);
 
+                    addPosition(pair, orderId, side as 'BUY' | 'SELL', filledPrice, contracts);
+                    recordTrade(pair, side as 'BUY' | 'SELL'); // Sniper Mode: Track for two-chances rule
+
+                    // === SUCCESS RESPONSE ===
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
                         success: true,
                         order_id: orderId,
+                        pair: pair,
+                        side: side,
+                        contracts: contracts,
                         entry_price: filledPrice,
-                        contracts: contracts.toFixed(4),
-                        sl_price: sl_price,
-                        tp_price: tp_price,
-                        notional: notional.toFixed(2),
-                        margin_used: marginRequired.toFixed(2),
+                        sl_price: parseFloat(slPrice.toFixed(2)),
+                        tp_price: parseFloat(tpPrice.toFixed(2)),
+                        atr: parseFloat(atr.toFixed(2)),
+                        actual_risk: parseFloat(actualRisk.toFixed(2)),
+                        margin_used: parseFloat(marginRequired.toFixed(2)),
                         leverage: leverage
                     }));
 
-                    console.log(`✅ [ORDER EXECUTED] ${signal} ${pair} - Order ID: ${orderId}, Entry: ${filledPrice}`);
+                    console.log(`\u2705 [V21 SUCCESS] ${side} ${pair} - Order: ${orderId}, Entry: ${filledPrice.toFixed(2)}, Risk: $${actualRisk.toFixed(2)}`);
                 } catch (error: any) {
-                    console.error('❌ [ORDER EXECUTION ERROR]:', error.response?.data || error.message);
+                    console.error('\u274c [V21 EXECUTION ERROR]:', error.response?.data || error.message);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
                         success: false,
@@ -626,7 +966,76 @@ function startServer() {
             return;
         }
 
-        // 6. FEAR AND GREED PROXY (NEW)
+        // 6. POSITIONS LIST (V21 - PORTFOLIO MANAGEMENT)
+        if (req.method === 'GET' && parsedUrl.pathname === '/positions') {
+            try {
+                await refreshAccountData();
+
+                const totalMarginUsed = activePositions.reduce((sum, pos) => {
+                    const positionValue = pos.contracts * pos.entryPrice;
+                    const leverage = leverageCache.get(pos.pair) || 1;
+                    return sum + (positionValue / leverage);
+                }, 0);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    active_positions: activePositions.length,
+                    max_positions: MAX_POSITIONS,
+                    positions: activePositions,
+                    total_margin_used: parseFloat(totalMarginUsed.toFixed(2)),
+                    available_balance: parseFloat(accountBalance.toFixed(2)),
+                    available_margin: parseFloat((accountBalance - totalMarginUsed).toFixed(2))
+                }));
+
+                console.log(`[POSITIONS] ${activePositions.length}/${MAX_POSITIONS} active, margin used: $${totalMarginUsed.toFixed(2)}`);
+            } catch (error: any) {
+                console.error('[POSITIONS ERROR]:', error.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Failed to fetch positions', details: error.message }));
+            }
+            return;
+        }
+
+        // 7. CLOSE POSITION (V21 - MANUAL POSITION MANAGEMENT)
+        if (req.method === 'POST' && parsedUrl.pathname === '/close-position') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    const { order_id, hit_sl } = data;
+
+                    if (!order_id) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Missing order_id' }));
+                        return;
+                    }
+
+                    const pos = activePositions.find(p => p.orderId === order_id);
+                    if (!pos) {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Position not found' }));
+                        return;
+                    }
+
+                    removePosition(order_id, hit_sl === true);
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        message: `Position ${pos.pair} closed`,
+                        cooldown_active: hit_sl ? '3 hours' : 'none'
+                    }));
+                } catch (error: any) {
+                    console.error('[CLOSE POSITION ERROR]:', error.message);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Failed to close position', details: error.message }));
+                }
+            });
+            return;
+        }
+
+        // 8. FEAR AND GREED PROXY (NEW)
         if (parsedUrl.pathname === '/fng') {
             console.log(`[PROXY] Fetching Fear & Greed Index...`);
             try {
@@ -642,7 +1051,7 @@ function startServer() {
             return;
         }
 
-        // 4. NEWS RSS PROXY (NEW)
+        // 9. NEWS RSS PROXY
         if (parsedUrl.pathname === '/news') {
             console.log(`[PROXY] Fetching CoinTelegraph RSS...`);
             try {
@@ -658,7 +1067,7 @@ function startServer() {
             return;
         }
 
-        // 5. MACRO CALENDAR (KEYLESS - FOREXFACTORY)
+        // 10. MACRO CALENDAR (KEYLESS - FOREXFACTORY)
         if (req.method === 'GET' && parsedUrl.pathname === '/macro') {
             try {
                 // Check Cache (1 hour)
@@ -930,39 +1339,7 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
     });
 }
 
-// --- DAILY REPORT ---
-function checkDailyReset() {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
 
-    if (today !== currentDay) {
-        printDailyReport();
-        dailyTrades = [];
-        currentDay = today;
-    }
-}
-
-function printDailyReport() {
-    const wins = dailyTrades.filter(t => t.type === 'WIN').length;
-    const losses = dailyTrades.filter(t => t.type === 'LOSS').length;
-    const totalPnL = dailyTrades.reduce((sum, t) => sum + t.pnl, 0);
-
-    console.log(`\n========================================`);
-    console.log(`📅 DAILY SUMMARY: ${currentDay}`);
-    console.log(`========================================`);
-
-    dailyTrades.forEach((t, i) => {
-        const icon = t.type === 'WIN' ? '🟢' : '🔴';
-        console.log(`${i + 1}. ${icon} ${t.pair} (${t.time}): ${t.pnl}%`);
-    });
-
-    console.log(`----------------------------------------`);
-    console.log(`🏆 WINS: ${wins} | 💀 LOSSES: ${losses}`);
-    console.log(`💰 TOTAL PNL: ${totalPnL.toFixed(2)}%`);
-    console.log(`========================================\n`);
-}
-
-setInterval(checkDailyReset, 60000);
 
 // --- WEBSOCKET ---
 function connectWs() {
