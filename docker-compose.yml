@@ -11,3 +11,9 @@ services:
       - FINNHUB_KEY=d5ole3hr01qjast7epj0d5ole3hr01qjast7epjg
     volumes:
       - "./oracle.ts:/app/oracle.ts"
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

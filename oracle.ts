@@ -1411,13 +1411,39 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
             return;
         }
 
+        // HEALTH CHECK ENDPOINT
+        if (req.method === 'GET' && parsedUrl.pathname === '/health') {
+            const now = Date.now();
+            const wsAge = now - lastWsUpdate;
+            const wsStatus = wsConnected && wsAge < 60000 ? 'Connected' : 'Disconnected';
+
+            const modeStatus = SIMULATION_MODE ? 'SIMULATION' : 'LIVE';
+            const positionsCount = SIMULATION_MODE ? virtualPositions.length : activePositions.length;
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'Online',
+                message: '🎯 Oracle watching markets',
+                mode: modeStatus,
+                websocket: wsStatus,
+                last_update: Math.floor(wsAge / 1000) + 's ago',
+                active_positions: positionsCount,
+                max_positions: MAX_POSITIONS,
+                virtual_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
+                uptime: process.uptime() + 's'
+            }));
+            return;
+        }
+
 
         res.writeHead(200);
         res.end("Futures Oracle Running (V12 - Autonomous). Endpoints: GET /price, /market-context");
     });
 
     server.listen(PORT, () => {
-        console.log(`✅ [FUTURES ORACLE] Captain's Log active on port ${PORT}`);
+        const modeTag = SIMULATION_MODE ? '🎮 [SIMULATION]' : '💵 [LIVE]';
+        console.log(`✅ [FUTURES ORACLE] ${modeTag} Captain's Log active on port ${PORT}`);
+        console.log(`🎯 Oracle watching markets - Ready for signals`);
     });
 }
 
