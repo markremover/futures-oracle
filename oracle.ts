@@ -102,34 +102,26 @@ class PriceMonitor {
         this.checkVelocity(pair, price, buffer);
     }
 
-    private checkVelocity(pair: string, currentPrice: number, buffer: { time: number, price: number }[]) {
+    private async checkVelocity(pair: string, currentPrice: number, buffer: { time: number, price: number }[]) {
         if (buffer.length < 2) return;
 
         const oldest = buffer[0];
         const change = ((currentPrice - oldest.price) / oldest.price) * 100;
         const absChange = Math.abs(change);
 
-        // --- DYNAMIC THRESHOLD (AGGRESSIVE SHORT) ---
-        // --- DYNAMIC THRESHOLD (SMART COPY) ---
-        // High Volatility (DOGE, SUI) -> 1.2%
-        // Standard (ETH, SOL, XRP)   -> 0.8%
-
+        // --- V22 DYNAMIC THRESHOLD (BIDIRECTIONAL) ---
+        // Majors (ETH, SOL, XRP) -> 0.8%
+        // Volatile (DOGE, SUI)   -> 1.2%
         let threshold = 0.8;
         if (pair.includes("DOGE") || pair.includes("SUI")) {
             threshold = 1.2;
         }
 
-        // Check Global Stock Sentiment
+        // Crash Protection Sensitivity
         const sentiment = stockCache?.sentiment || "NEUTRAL";
-
-        // If Market is Bearish/Crashing, be more sensitive to DROPS (Shorts)
         if ((sentiment === "BEARISH" || sentiment === "CRASH_WARNING") && change < 0) {
-            // Reduce threshold by 0.3% in crash mode
             threshold = Math.max(0.5, threshold - 0.3);
         }
-
-        const direction = change > 0 ? "UP ⬆️" : "DOWN ⬇️";
-        const sign = change > 0 ? "+" : "";
 
         if (absChange >= threshold) {
             const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
@@ -216,6 +208,79 @@ class PriceMonitor {
         } catch (e: any) {
             console.error(`❌ [WEBHOOK FAILED]`, e.message);
         }
+    }
+
+    private async getTrendData(pair: string): Promise<{ sma200_1h: number, sma200_4h: number, currentPrice: number } | null> {
+        try {
+            // Fetch 1h candles (last 200 hours = ~8 days)
+            const candles1h = await this.fetchCandles(pair, 3600, 200);
+            // Fetch 4h candles (last 800 hours = ~33 days)
+            const candles4h = await this.fetchCandles(pair, 14400, 200);
+
+            if (!candles1h || !candles4h) return null;
+
+            const sma200_1h = this.calculateSMA(candles1h, 200);
+            const sma200_4h = this.calculateSMA(candles4h, 200);
+            const currentPrice = prices.get(pair) || 0;
+
+            return { sma200_1h, sma200_4h, currentPrice };
+        } catch (e: any) {
+            console.error(`❌ [TREND ERROR] Failed to fetch trend data for ${pair}:`, e.message);
+            return null;
+        }
+    }
+
+    private async fetchCandles(pair: string, granularity: number, count: number): Promise<number[] | null> {
+        try {
+            const endTime = Math.floor(Date.now() / 1000);
+            const startTime = endTime - (granularity * count);
+
+            const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
+                params: {
+                    start: startTime,
+                    end: endTime,
+                    granularity
+                }
+            });
+
+            if (!response.data || !Array.isArray(response.data)) return null;
+
+            // Coinbase returns [time, low, high, open, close, volume]
+            // We need close prices (index 4)
+            return response.data.map((candle: any) => candle[4]);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private calculateSMA(prices: number[], period: number): number {
+        if (prices.length < period) return prices[prices.length - 1] || 0;
+        const slice = prices.slice(-period);
+        const sum = slice.reduce((a, b) => a + b, 0);
+        return sum / period;
+    }
+
+    private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number } | null): string | null {
+        // If no trend data available, allow signal (don't block)
+        if (!trendData) return null;
+
+        const { sma200_1h, sma200_4h, currentPrice } = trendData;
+
+        // Block LONG signals in downtrend (price below SMA200 on both timeframes)
+        if (currentPrice < sma200_1h && currentPrice < sma200_4h) {
+            return `DOWNTREND: Price ${currentPrice.toFixed(2)} < SMA200_1h ${sma200_1h.toFixed(2)} & SMA200_4h ${sma200_4h.toFixed(2)}`;
+        }
+
+        // For now, we don't block SHORT signals (Oracle doesn't generate them yet)
+        // Future: Block SHORT in uptrend (price > SMA200)
+
+        return null; // Signal allowed
+    }
+
+    private async triggerAlert(pair: string, type: string, value: number) {
+        // LEGACY ORACLE TRIGGER - KEPT FOR BACKWARD COMPATIBILITY IF NEEDED
+        // BUT REDIRECTING TO SIM TRADE FOR CONSISTENCY
+        this.triggerSimTrade(pair, value > 0 ? 'BUY' : 'SELL', prices.get(pair) || 0, value);
     }
 }
 
@@ -580,134 +645,6 @@ function monitorVirtualPositions() {
 }
 setInterval(monitorVirtualPositions, 2000); // Check every 2s
 
-// --- PRICE MONITOR (AUTONOMOUS AGENT) ---
-class PriceMonitor {
-    private history: Map<string, { time: number, price: number }[]> = new Map();
-    private lastAlert: Map<string, number> = new Map();
-
-    update(pair: string, price: number) {
-        const now = Date.now();
-        if (!this.history.has(pair)) this.history.set(pair, []);
-
-        const buffer = this.history.get(pair)!;
-        buffer.push({ time: now, price });
-
-        // Prune older than 5 minutes (300000 ms)
-        const cutoff = now - 300000;
-        while (buffer.length > 0 && buffer[0].time < cutoff) {
-            buffer.shift();
-        }
-
-        this.checkVelocity(pair, price, buffer);
-    }
-
-    private async checkVelocity(pair: string, currentPrice: number, buffer: { time: number, price: number }[]) {
-        if (buffer.length < 2) return;
-
-        const oldest = buffer[0];
-        const change = ((currentPrice - oldest.price) / oldest.price) * 100;
-        const absChange = Math.abs(change);
-
-        // --- V22 DYNAMIC THRESHOLD (BIDIRECTIONAL) ---
-        // Majors (ETH, SOL, XRP) -> 0.8%
-        // Volatile (DOGE, SUI)   -> 1.2%
-        let threshold = 0.8;
-        if (pair.includes("DOGE") || pair.includes("SUI")) {
-            threshold = 1.2;
-        }
-
-        // Crash Protection Sensitivity
-        const sentiment = stockCache?.sentiment || "NEUTRAL";
-        if ((sentiment === "BEARISH" || sentiment === "CRASH_WARNING") && change < 0) {
-            threshold = Math.max(0.5, threshold - 0.3);
-        }
-
-        if (absChange >= threshold) {
-            const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
-            console.log(`🚀 [GHOST TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
-
-            this.triggerGhostTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
-        }
-    }
-
-    private async triggerGhostTrade(pair: string, side: 'BUY' | 'SELL', price: number, change: number) {
-        const now = Date.now();
-        const last = this.lastAlert.get(pair) || 0;
-        const COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
-
-        if (now - last < COOLDOWN_MS) return;
-
-        // CHECK FILTERS
-        // 1. Trend Filter (Only Block Longs in Downtrend)
-        const trendData = await this.getTrendData(pair);
-        if (trendData && side === 'BUY') {
-            const blockReason = this.shouldBlockSignal(pair, trendData);
-            if (blockReason) {
-                console.log(`🚫 [BLOCKED] ${pair} LONG blocked by Trend`);
-                return;
-            }
-        }
-
-        // 2. Portfolio Limit
-        if (activePositions.length >= MAX_POSITIONS || virtualPositions.length >= MAX_POSITIONS) {
-            console.log(`🚫 [BLOCKED] Max positions reached`);
-            return;
-        }
-
-        // --- OPEN GHOST POSITION ---
-        this.lastAlert.set(pair, now);
-
-        // Calculate Risk
-        const atr = calculateATR(await this.fetchCandles(pair, 3600, 50) || [], 14) || (price * 0.02);
-
-        // SL Distance (1.5x ATR)
-        const slDist = atr * 1.5;
-        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
-        const tpPrice = side === 'BUY' ? price + (atr * 3) : price - (atr * 3);
-
-        // Position Sizing ($10 Risk)
-        // Risk = |Entry - SL| * Contracts
-        // Contracts = $10 / |Entry - SL|
-        const riskPerTrade = 10;
-        const contracts = Math.floor(riskPerTrade / slDist);
-
-        if (contracts <= 0) return;
-
-        // Leverage Calc
-        const notional = contracts * price;
-        const leverage = notional / SIM_BALANCE; // Based on $1400
-
-        // Add to Memory
-        const orderId = `GHOST-${now}`;
-        virtualPositions.push({
-            pair, orderId, side, entryPrice: price, contracts, timestamp: now,
-            slPrice, tpPrice, isSimulated: true
-        });
-
-        console.log(`👻 [GHOST OPEN] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} | TP: ${tpPrice.toFixed(2)}`);
-
-        // --- V22 REPORTING: OPEN ---
-        const symbol = pair.split('-')[0].toLowerCase();
-        const url = `${N8N_WEBHOOK_BASE}${symbol}`;
-
-        try {
-            await axios.post(url, {
-                type: 'GHOST_OPEN',
-                pair,
-                side,
-                entry_price: price,
-                leverage: leverage.toFixed(1),
-                margin: (notional / 10).toFixed(2), // Mock 10x margin usage
-                tp_price: tpPrice,
-                sl_price: slPrice,
-                risk: riskPerTrade,
-                timestamp: now,
-                message: `🚀 [GHOST OPEN] ${pair} | ${side}\nEntry: $${price}\nLeverage: x${leverage.toFixed(1)}\nTarget (TP): $${tpPrice.toFixed(2)} (Goal: +$20)\nRisk (SL): $${slPrice.toFixed(2)} (Risk: -$10)`
-            });
-        } catch (e: any) {
-            console.error(`❌ [WEBHOOK FAILED]`, e.message);
-        }
-    }
 
 // --- SERVER ---
 function startServer() {
