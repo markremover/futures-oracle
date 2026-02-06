@@ -129,7 +129,11 @@ class PriceMonitor {
         }
 
         if (absChange >= threshold) {
+            const direction = change > 0 ? "UP ⬆️" : "DOWN ⬇️";
+            console.log(`🔍 [VELOCITY CHECK] ${pair}: ${change > 0 ? '+' : ''}${change.toFixed(2)}% in 5min ${direction} | Threshold: ${threshold.toFixed(1)}% | ✅ ALERT TRIGGERED`);
             this.triggerAlert(pair, "VELOCITY", change);
+        } else {
+            console.log(`⏸️  [VELOCITY CHECK] ${pair}: ${change > 0 ? '+' : ''}${change.toFixed(2)}% in 5min | Threshold: ${threshold.toFixed(1)}% | Below threshold`);
         }
     }
 
