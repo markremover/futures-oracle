@@ -29,7 +29,7 @@ if docker ps | grep -q "futures-oracle"; then
     echo -e "   Status: $(docker ps --filter "name=futures-oracle" --format "{{.Status}}")"
     
     # Smart Health Check (Broader Search)
-    if docker logs --tail 100 futures-oracle | grep -qE "Connected: true|AI Analysis"; then
+    if docker logs --tail 100 futures-oracle | grep -qE "Connected: true|AI Analysis|ORACLE PULSE"; then
          echo -e "   Health: ${GREEN}🟢 SYSTEM ONLINE & WATCHING MARKETS${NC}"
     else
          echo -e "   Health: ${YELLOW}🟡 INITIALIZING (Please wait)...${NC}"
@@ -38,7 +38,12 @@ if docker ps | grep -q "futures-oracle"; then
     echo -e "   ${BLUE}Recent Logs:${NC}" 
     docker logs --tail 3 futures-oracle | sed 's/^/   / '
 else
-    echo -e "${RED}❌ OFFLINE${NC}"
+    echo -e "${RED}❌ OFFLINE${NC} - CRASH DETECTED"
+    echo -e "${RED}⚠️  LAST ERROR LOGS (Showing why it crashed):${NC}"
+    echo "---------------------------------------------------"
+    docker logs --tail 20 futures-oracle
+    echo "---------------------------------------------------"
+    echo -e "${YELLOW}💡 FIX: Copy the error above and send it to support.${NC}"
 fi
 
 echo ""
