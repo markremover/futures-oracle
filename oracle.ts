@@ -1647,7 +1647,11 @@ function logMarketPulse() {
     });
     console.log('--------------------------------------------------');
 }
-setInterval(logMarketPulse, 60000); // Pulse every 1 min
+
+// Start pulse after 15 seconds (give time to accumulate data)
+setTimeout(logMarketPulse, 15000);
+// Then pulse every 30 seconds
+setInterval(logMarketPulse, 30000);
 
 // --- MAIN ---
 startServer();
