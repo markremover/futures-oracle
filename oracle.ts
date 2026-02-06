@@ -292,12 +292,26 @@ class PriceMonitor {
         }
 
         const oldest = buffer[0];
+        const now = Date.now();
+        const timeElapsed = Math.floor((now - oldest.time) / 1000); // seconds
         const change = ((currentPrice - oldest.price) / oldest.price) * 100;
         const sign = change > 0 ? "+" : "";
-        const color = change > 0 ? "🟢" : "🔴";
 
-        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | 5m: ${sign}${change.toFixed(2)}% ${color}`);
+        // Direction indicator
+        const direction = change > 0 ? "🟢 LONG" : "🔴 SHORT";
+
+        // Velocity threshold check
+        let threshold = 0.8;
+        if (pair.includes("DOGE") || pair.includes("SUI")) {
+            threshold = 1.2;
+        }
+
+        const absChange = Math.abs(change);
+        const velocityStatus = absChange >= threshold ? "⚡ IMPULSE" : "📊 Normal";
+
+        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | ${timeElapsed}s | ${sign}${change.toFixed(2)}% ${direction} | ${velocityStatus}`);
     }
+
 }
 
 const monitor = new PriceMonitor();
@@ -1509,7 +1523,7 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
 
 
         res.writeHead(200);
-        res.end("Futures Oracle Running (V12 - Autonomous). Endpoints: GET /price, /market-context");
+        res.end("Futures Oracle Running (V22.6 - Ghost Sniper). Endpoints: GET /price, /market-context");
     });
 
     server.listen(PORT, () => {
