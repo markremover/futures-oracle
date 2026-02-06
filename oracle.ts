@@ -128,12 +128,17 @@ class PriceMonitor {
             threshold = Math.max(0.5, threshold - 0.3);
         }
 
+        const direction = change > 0 ? "UP ⬆️" : "DOWN ⬇️";
+        const sign = change > 0 ? "+" : "";
+
         if (absChange >= threshold) {
-            const direction = change > 0 ? "UP ⬆️" : "DOWN ⬇️";
-            console.log(`🔍 [VELOCITY CHECK] ${pair}: ${change > 0 ? '+' : ''}${change.toFixed(2)}% in 5min ${direction} | Threshold: ${threshold.toFixed(1)}% | ✅ ALERT TRIGGERED`);
+            console.log(`🔍 [VELOCITY CHECK] ${pair}: ${sign}${change.toFixed(2)}% in 5min ${direction} | Threshold: ${threshold.toFixed(1)}% | ✅ ALERT TRIGGERED`);
             this.triggerAlert(pair, "VELOCITY", change);
         } else {
-            console.log(`⏸️  [VELOCITY CHECK] ${pair}: ${change > 0 ? '+' : ''}${change.toFixed(2)}% in 5min | Threshold: ${threshold.toFixed(1)}% | Below threshold`);
+            // Optional: Log non-triggering movements if they are significant (e.g. > 0.3%) to avoid spam
+            if (absChange > 0.3) {
+                console.log(`⏸️  [VELOCITY CHECK] ${pair}: ${sign}${change.toFixed(2)}% in 5min ${direction} | Threshold: ${threshold.toFixed(1)}% | Below threshold`);
+            }
         }
     }
 
