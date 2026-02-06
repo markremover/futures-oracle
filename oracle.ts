@@ -567,10 +567,12 @@ function canOpenNewPosition(pair: string): { allowed: boolean, reason?: string }
 
 // --- GHOST SNIPER: VIRTUAL POSITION MONITOR ---
 
+// --- ORACLE FUTURES: ACTIVE SIMULATION MONITOR (V22) ---
+
 function monitorVirtualPositions() {
     if (!SIMULATION_MODE || virtualPositions.length === 0) return;
 
-    virtualPositions.forEach((pos, index) => {
+    virtualPositions.forEach(async (pos, index) => {
         const currentPrice = prices.get(pos.pair);
         if (!currentPrice) return;
 
@@ -580,57 +582,172 @@ function monitorVirtualPositions() {
         const slHit = pos.side === 'BUY' ? currentPrice <= (pos.slPrice || 0) : currentPrice >= (pos.slPrice || 0);
         const tpHit = pos.side === 'BUY' ? currentPrice >= (pos.tpPrice || 999999) : currentPrice <= (pos.tpPrice || 0);
 
-        if (slHit) {
-            const slPnl = ((pos.slPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
-            simBalance += Math.abs(slPnl);
-            totalVirtualPnl += slPnl;
-            console.log(`🛑 [SIM] SL HIT: ${pos.pair} @ $${currentPrice.toFixed(2)} | PnL: $${slPnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
+        if (slHit || tpHit) {
+            const isWin = tpHit;
+            const pnl = isWin
+                ? ((pos.tpPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1)
+                : ((pos.slPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
+
+            simBalance += pnl;
+            totalVirtualPnl += pnl;
+
+            const resultEmoji = isWin ? "✅ WIN" : "❌ LOSS";
+            console.log(`🎯 [ORACLE RESULT] ${pos.pair} ${resultEmoji} | PnL: $${pnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
+
+            // REMOVE FROM LIST
             virtualPositions.splice(index, 1);
-            updateTradeResult(pos.pair, 'LOSS', slPnl);
+            updateTradeResult(pos.pair, isWin ? 'WIN' : 'LOSS', pnl);
             slCooldowns.set(pos.pair, Date.now());
-        } else if (tpHit) {
-            const tpPnl = ((pos.tpPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
-            simBalance += Math.abs(tpPnl);
-            totalVirtualPnl += tpPnl;
-            console.log(`🎯 [SIM] TP HIT: ${pos.pair} @ $${currentPrice.toFixed(2)} | PnL: $${tpPnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
-            virtualPositions.splice(index, 1);
-            updateTradeResult(pos.pair, 'WIN', tpPnl);
+
+            // --- V22 REPORTING: FINAL RESULT ---
+            const symbol = pos.pair.split('-')[0].toLowerCase();
+            const url = `${N8N_WEBHOOK_BASE}${symbol}`;
+            try {
+                await axios.post(url, {
+                    type: 'ORACLE_CLOSE',
+                    pair: pos.pair,
+                    result: isWin ? 'TP_HIT' : 'SL_HIT',
+                    pnl: pnl.toFixed(2),
+                    exit_price: currentPrice,
+                    balance: simBalance.toFixed(2),
+                    message: `🎯 [ORACLE RESULT] ${pos.pair} ${resultEmoji}\nStatus: ${isWin ? 'TP HIT' : 'SL HIT'}\nProfit/Loss: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}\nFinal Price: $${currentPrice}`
+                });
+            } catch (e: any) {
+                console.error(`❌ [WEBHOOK FAILED]`, e.message);
+            }
         }
     });
 }
+setInterval(monitorVirtualPositions, 2000); // Check every 2s
 
-setInterval(monitorVirtualPositions, 5000);
+// --- PRICE MONITOR (AUTONOMOUS AGENT) ---
+class PriceMonitor {
+    private history: Map<string, { time: number, price: number }[]> = new Map();
+    private lastAlert: Map<string, number> = new Map();
 
-/**
- * Add position to portfolio tracking
- */
-function addPosition(pair: string, orderId: string, side: 'BUY' | 'SELL', entryPrice: number, contracts: number) {
-    activePositions.push({
-        pair,
-        orderId,
-        side,
-        entryPrice,
-        contracts,
-        timestamp: Date.now()
-    });
-    console.log(`➕ [PORTFOLIO] Added ${pair} position (${activePositions.length}/${MAX_POSITIONS})`);
-}
+    update(pair: string, price: number) {
+        const now = Date.now();
+        if (!this.history.has(pair)) this.history.set(pair, []);
 
-/**
- * Remove position from tracking (called when TP/SL is hit)
- */
-function removePosition(orderId: string, hitSL: boolean = false) {
-    const pos = activePositions.find(p => p.orderId === orderId);
-    if (!pos) return;
+        const buffer = this.history.get(pair)!;
+        buffer.push({ time: now, price });
 
-    if (hitSL) {
-        slCooldowns.set(pos.pair, Date.now());
-        console.log(`🔒 [COOLDOWN] ${pos.pair} blocked for 3 hours after SL hit`);
+        // Prune older than 5 minutes (300000 ms)
+        const cutoff = now - 300000;
+        while (buffer.length > 0 && buffer[0].time < cutoff) {
+            buffer.shift();
+        }
+
+        this.checkVelocity(pair, price, buffer);
     }
 
-    activePositions = activePositions.filter(p => p.orderId !== orderId);
-    console.log(`➖ [PORTFOLIO] Removed ${pos.pair} (${activePositions.length}/${MAX_POSITIONS} remaining)`);
-}
+    private async checkVelocity(pair: string, currentPrice: number, buffer: { time: number, price: number }[]) {
+        if (buffer.length < 2) return;
+
+        const oldest = buffer[0];
+        const change = ((currentPrice - oldest.price) / oldest.price) * 100;
+        const absChange = Math.abs(change);
+
+        // --- V22 DYNAMIC THRESHOLD (BIDIRECTIONAL) ---
+        // Majors (ETH, SOL, XRP) -> 0.8%
+        // Volatile (DOGE, SUI)   -> 1.2%
+        let threshold = 0.8;
+        if (pair.includes("DOGE") || pair.includes("SUI")) {
+            threshold = 1.2;
+        }
+
+        // Crash Protection Sensitivity
+        const sentiment = stockCache?.sentiment || "NEUTRAL";
+        if ((sentiment === "BEARISH" || sentiment === "CRASH_WARNING") && change < 0) {
+            threshold = Math.max(0.5, threshold - 0.3);
+        }
+
+        if (absChange >= threshold) {
+            const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
+            console.log(`🚀 [GHOST TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
+
+            this.triggerGhostTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
+        }
+    }
+
+    private async triggerGhostTrade(pair: string, side: 'BUY' | 'SELL', price: number, change: number) {
+        const now = Date.now();
+        const last = this.lastAlert.get(pair) || 0;
+        const COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+        if (now - last < COOLDOWN_MS) return;
+
+        // CHECK FILTERS
+        // 1. Trend Filter (Only Block Longs in Downtrend)
+        const trendData = await this.getTrendData(pair);
+        if (trendData && side === 'BUY') {
+            const blockReason = this.shouldBlockSignal(pair, trendData);
+            if (blockReason) {
+                console.log(`🚫 [BLOCKED] ${pair} LONG blocked by Trend`);
+                return;
+            }
+        }
+
+        // 2. Portfolio Limit
+        if (activePositions.length >= MAX_POSITIONS || virtualPositions.length >= MAX_POSITIONS) {
+            console.log(`🚫 [BLOCKED] Max positions reached`);
+            return;
+        }
+
+        // --- OPEN GHOST POSITION ---
+        this.lastAlert.set(pair, now);
+
+        // Calculate Risk
+        const atr = calculateATR(await this.fetchCandles(pair, 3600, 50) || [], 14) || (price * 0.02);
+
+        // SL Distance (1.5x ATR)
+        const slDist = atr * 1.5;
+        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
+        const tpPrice = side === 'BUY' ? price + (atr * 3) : price - (atr * 3);
+
+        // Position Sizing ($10 Risk)
+        // Risk = |Entry - SL| * Contracts
+        // Contracts = $10 / |Entry - SL|
+        const riskPerTrade = 10;
+        const contracts = Math.floor(riskPerTrade / slDist);
+
+        if (contracts <= 0) return;
+
+        // Leverage Calc
+        const notional = contracts * price;
+        const leverage = notional / SIM_BALANCE; // Based on $1400
+
+        // Add to Memory
+        const orderId = `GHOST-${now}`;
+        virtualPositions.push({
+            pair, orderId, side, entryPrice: price, contracts, timestamp: now,
+            slPrice, tpPrice, isSimulated: true
+        });
+
+        console.log(`👻 [GHOST OPEN] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} | TP: ${tpPrice.toFixed(2)}`);
+
+        // --- V22 REPORTING: OPEN ---
+        const symbol = pair.split('-')[0].toLowerCase();
+        const url = `${N8N_WEBHOOK_BASE}${symbol}`;
+
+        try {
+            await axios.post(url, {
+                type: 'GHOST_OPEN',
+                pair,
+                side,
+                entry_price: price,
+                leverage: leverage.toFixed(1),
+                margin: (notional / 10).toFixed(2), // Mock 10x margin usage
+                tp_price: tpPrice,
+                sl_price: slPrice,
+                risk: riskPerTrade,
+                timestamp: now,
+                message: `🚀 [GHOST OPEN] ${pair} | ${side}\nEntry: $${price}\nLeverage: x${leverage.toFixed(1)}\nTarget (TP): $${tpPrice.toFixed(2)} (Goal: +$20)\nRisk (SL): $${slPrice.toFixed(2)} (Risk: -$10)`
+            });
+        } catch (e: any) {
+            console.error(`❌ [WEBHOOK FAILED]`, e.message);
+        }
+    }
 
 // --- SERVER ---
 function startServer() {
