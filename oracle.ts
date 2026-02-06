@@ -282,6 +282,22 @@ class PriceMonitor {
         // BUT REDIRECTING TO SIM TRADE FOR CONSISTENCY
         this.triggerSimTrade(pair, value > 0 ? 'BUY' : 'SELL', prices.get(pair) || 0, value);
     }
+
+    public logPairStatus(pair: string, currentPrice: number) {
+        if (!this.history.has(pair)) return;
+        const buffer = this.history.get(pair)!;
+        if (buffer.length < 2) {
+            console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | ⏳ Gathering data...`);
+            return;
+        }
+
+        const oldest = buffer[0];
+        const change = ((currentPrice - oldest.price) / oldest.price) * 100;
+        const sign = change > 0 ? "+" : "";
+        const color = change > 0 ? "🟢" : "🔴";
+
+        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | 5m: ${sign}${change.toFixed(2)}% ${color}`);
+    }
 }
 
 const monitor = new PriceMonitor();
