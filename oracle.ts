@@ -590,6 +590,36 @@ function canOpenNewPosition(pair: string): { allowed: boolean, reason?: string }
     return { allowed: true };
 }
 
+/**
+ * Remove position from active list (Live or Virtual)
+ */
+function removePosition(orderId: string, hitSl: boolean = false) {
+    // Check in active (live) positions
+    const liveIdx = activePositions.findIndex(p => p.orderId === orderId);
+    if (liveIdx !== -1) {
+        const pos = activePositions[liveIdx];
+        activePositions.splice(liveIdx, 1);
+        if (hitSl) {
+            slCooldowns.set(pos.pair, Date.now());
+        }
+        console.log(`[POSITION REMOVED] ${pos.pair} (Order ${orderId})`);
+        return;
+    }
+
+    // Check in virtual positions
+    const simIdx = virtualPositions.findIndex(p => p.orderId === orderId);
+    if (simIdx !== -1) {
+        const pos = virtualPositions[simIdx];
+        virtualPositions.splice(simIdx, 1);
+        if (hitSl) {
+            slCooldowns.set(pos.pair, Date.now());
+        }
+        console.log(`[SIM POSITION REMOVED] ${pos.pair} (Order ${orderId})`);
+        return;
+    }
+    console.log(`[WARN] removePosition called but order ${orderId} not found`);
+}
+
 // --- GHOST SNIPER: VIRTUAL POSITION MONITOR ---
 
 // --- ORACLE FUTURES: ACTIVE SIMULATION MONITOR (V22) ---
