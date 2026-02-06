@@ -176,7 +176,7 @@
     {
       "parameters": {
         "chatId": "5687487073",
-        "text": "={{ $json.success ? '✅ ORDER EXECUTED' : '❌ ORDER FAILED' }}\\n\\nPair: {{ $json.pair || 'ETH-USD' }}\\nSignal: {{ $json.signal || $json.final_signal }}\\nEntry: {{ $json.entry_price }}\\nOrder ID: {{ $json.order_id }}\\nContracts: {{ $json.contracts }}\\nSL: {{ $json.sl_price }} | TP: {{ $json.tp_price }}\\nMargin Used: ${{ $json.margin_used }}\\n\\n🌍 Macro: {{ $('Market Context').first().json.sentiment }}  ℹ️ Confidence: {{ $json.confidence_score || $json.confidence }}%",
+        "text": "={{$json.success ? '✅ ORDER EXECUTED' : '❌ ORDER FAILED'}}\\n\\n📊 Pair: {{$json.pair}}\\n🔵 Signal: {{$json.side || 'WAIT'}}\\n💰 Entry: ${{$json.entry_price}}\\n🆔 Order ID: {{$json.order_id}}\\n📦 Contracts: {{$json.contracts}}\\n🛑 SL: ${{$json.sl_price}} | 🎯 TP: ${{$json.tp_price}}\\n💵 Margin: ${{$json.margin_used}}\\n{{$json.mode === 'SIMULATION' ? '🎮 TEST MODE' : '💵 LIVE MODE'}}",
         "additionalFields": {
           "parse_mode": "HTML"
         }
