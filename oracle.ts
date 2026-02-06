@@ -132,127 +132,87 @@ class PriceMonitor {
         const sign = change > 0 ? "+" : "";
 
         if (absChange >= threshold) {
-            console.log(`🔍 [VELOCITY CHECK] ${pair}: ${sign}${change.toFixed(2)}% in 5min ${direction} | Threshold: ${threshold.toFixed(1)}% | ✅ ALERT TRIGGERED`);
-            this.triggerAlert(pair, "VELOCITY", change);
-        } else {
-            // Optional: Log non-triggering movements if they are significant (e.g. > 0.3%) to avoid spam
-            if (absChange > 0.3) {
-                console.log(`⏸️  [VELOCITY CHECK] ${pair}: ${sign}${change.toFixed(2)}% in 5min ${direction} | Threshold: ${threshold.toFixed(1)}% | Below threshold`);
-            }
+            const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
+            console.log(`🚀 [ORACLE TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
+
+            this.triggerSimTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
         }
     }
 
-    private async getTrendData(pair: string): Promise<{ sma200_1h: number, sma200_4h: number, currentPrice: number } | null> {
-        try {
-            // Fetch 1h candles (last 200 hours = ~8 days)
-            const candles1h = await this.fetchCandles(pair, 3600, 200);
-            // Fetch 4h candles (last 800 hours = ~33 days)
-            const candles4h = await this.fetchCandles(pair, 14400, 200);
-
-            if (!candles1h || !candles4h) return null;
-
-            const sma200_1h = this.calculateSMA(candles1h, 200);
-            const sma200_4h = this.calculateSMA(candles4h, 200);
-            const currentPrice = prices.get(pair) || 0;
-
-            return { sma200_1h, sma200_4h, currentPrice };
-        } catch (e: any) {
-            console.error(`❌ [TREND ERROR] Failed to fetch trend data for ${pair}:`, e.message);
-            return null;
-        }
-    }
-
-    private async fetchCandles(pair: string, granularity: number, count: number): Promise<number[] | null> {
-        try {
-            const endTime = Math.floor(Date.now() / 1000);
-            const startTime = endTime - (granularity * count);
-
-            const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
-                params: {
-                    start: startTime,
-                    end: endTime,
-                    granularity
-                }
-            });
-
-            if (!response.data || !Array.isArray(response.data)) return null;
-
-            // Coinbase returns [time, low, high, open, close, volume]
-            // We need close prices (index 4)
-            return response.data.map((candle: any) => candle[4]);
-        } catch (e) {
-            return null;
-        }
-    }
-
-    private calculateSMA(prices: number[], period: number): number {
-        if (prices.length < period) return prices[prices.length - 1] || 0;
-        const slice = prices.slice(-period);
-        const sum = slice.reduce((a, b) => a + b, 0);
-        return sum / period;
-    }
-
-    private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number } | null): string | null {
-        // If no trend data available, allow signal (don't block)
-        if (!trendData) return null;
-
-        const { sma200_1h, sma200_4h, currentPrice } = trendData;
-
-        // Block LONG signals in downtrend (price below SMA200 on both timeframes)
-        if (currentPrice < sma200_1h && currentPrice < sma200_4h) {
-            return `DOWNTREND: Price ${currentPrice.toFixed(2)} < SMA200_1h ${sma200_1h.toFixed(2)} & SMA200_4h ${sma200_4h.toFixed(2)}`;
-        }
-
-        // For now, we don't block SHORT signals (Oracle doesn't generate them yet)
-        // Future: Block SHORT in uptrend (price > SMA200)
-
-        return null; // Signal allowed
-    }
-
-    private async triggerAlert(pair: string, type: string, value: number) {
+    private async triggerSimTrade(pair: string, side: 'BUY' | 'SELL', price: number, change: number) {
         const now = Date.now();
         const last = this.lastAlert.get(pair) || 0;
-
-        // Extended cooldown: 3 hours instead of 15 mins to prevent spam during crashes
         const COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
-        if (now - last < COOLDOWN_MS) {
-            const remainingMin = Math.floor((COOLDOWN_MS - (now - last)) / 60000);
-            console.log(`⏸️  [COOLDOWN] ${pair} blocked - ${remainingMin}min remaining`);
+
+        if (now - last < COOLDOWN_MS) return;
+
+        // CHECK FILTERS
+        // 1. Trend Filter (Only Block Longs in Downtrend)
+        const trendData = await this.getTrendData(pair);
+        if (trendData && side === 'BUY') {
+            const blockReason = this.shouldBlockSignal(pair, trendData);
+            if (blockReason) {
+                console.log(`🚫 [BLOCKED] ${pair} LONG blocked by Trend`);
+                return;
+            }
+        }
+
+        // 2. Portfolio Limit
+        if (activePositions.length >= MAX_POSITIONS || virtualPositions.length >= MAX_POSITIONS) {
+            console.log(`🚫 [BLOCKED] Max positions reached`);
             return;
         }
 
-        // TREND PROTECTION: Check SMA200 before sending signal (NON-BLOCKING)
-        console.log(`🔍 [TREND CHECK] Analyzing ${pair} trend before signal...`);
-        const trendData = await this.getTrendData(pair);
-
-        if (!trendData) {
-            console.log(`⚠️  [TREND WARNING] Could not fetch trend data for ${pair} - ALLOWING signal (trend check skipped)`);
-            // Continue anyway - don't block signal if trend data unavailable
-        } else {
-            const blockReason = this.shouldBlockSignal(pair, trendData);
-            if (blockReason) {
-                console.log(`🚫 [BLOCKED] ${pair} signal blocked: ${blockReason}`);
-                return;
-            }
-            // Fix: Only access properties if trendData exists
-            console.log(`✅ [TREND OK] ${pair} passed trend check - Price: ${trendData.currentPrice.toFixed(2)}, SMA200_1h: ${trendData.sma200_1h.toFixed(2)}, SMA200_4h: ${trendData.sma200_4h.toFixed(2)}`);
-        }
-        console.log(`🚀 [ALERT] ${pair} triggered ${type}: ${value.toFixed(2)}% (Threshold checked)`);
+        // --- OPEN ORACLE POSITION ---
         this.lastAlert.set(pair, now);
 
-        // Construct unique URL: e.g. futurec-trigger-eth
-        const symbol = pair.split('-')[0].toLowerCase(); // ETH, SOL, etc.
+        // Calculate Risk
+        const atr = calculateATR(await this.fetchCandles(pair, 3600, 50) || [], 14) || (price * 0.02);
+
+        // SL Distance (1.5x ATR)
+        const slDist = atr * 1.5;
+        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
+        const tpPrice = side === 'BUY' ? price + (atr * 3) : price - (atr * 3);
+
+        // Position Sizing ($10 Risk)
+        // Risk = |Entry - SL| * Contracts
+        // Contracts = $10 / |Entry - SL|
+        const riskPerTrade = 10;
+        const contracts = Math.floor(riskPerTrade / slDist);
+
+        if (contracts <= 0) return;
+
+        // Leverage Calc
+        const notional = contracts * price;
+        const leverage = notional / SIM_BALANCE; // Based on $1400
+
+        // Add to Memory
+        const orderId = `SIM-${now}`;
+        virtualPositions.push({
+            pair, orderId, side, entryPrice: price, contracts, timestamp: now,
+            slPrice, tpPrice, isSimulated: true
+        });
+
+        console.log(`🧪 [ORACLE OPEN] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} | TP: ${tpPrice.toFixed(2)}`);
+
+        // --- V22 REPORTING: OPEN ---
+        const symbol = pair.split('-')[0].toLowerCase();
         const url = `${N8N_WEBHOOK_BASE}${symbol}`;
 
         try {
             await axios.post(url, {
+                type: 'ORACLE_OPEN',
                 pair,
-                type,
-                value,
+                side,
+                entry_price: price,
+                leverage: leverage.toFixed(1),
+                margin: (notional / 10).toFixed(2), // Mock 10x margin usage
+                tp_price: tpPrice,
+                sl_price: slPrice,
+                risk: riskPerTrade,
                 timestamp: now,
-                message: `Golden Moment: ${pair} moved ${value.toFixed(2)}% in 5m`
+                message: `🧪 [ORACLE TEST] ${pair} | ${side}\nEntry: $${price}\nLeverage: x${leverage.toFixed(1)}\nTarget (TP): $${tpPrice.toFixed(2)} (Goal: +$20)\nRisk (SL): $${slPrice.toFixed(2)} (Risk: -$10)`
             });
-            console.log(`✅ [WEBHOOK] Sent signal to ${url}`);
         } catch (e: any) {
             console.error(`❌ [WEBHOOK FAILED]`, e.message);
         }
