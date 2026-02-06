@@ -1521,9 +1521,33 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
             return;
         }
 
+        // ROOT ENDPOINT (same as /health for compatibility)
+        if (req.method === 'GET' && parsedUrl.pathname === '/') {
+            const now = Date.now();
+            const wsAge = now - lastWsUpdate;
+            const wsStatus = wsConnected && wsAge < 60000 ? 'Connected' : 'Disconnected';
 
-        res.writeHead(200);
-        res.end("Futures Oracle Running (V22.6 - Ghost Sniper). Endpoints: GET /price, /market-context");
+            const modeStatus = SIMULATION_MODE ? 'SIMULATION' : 'LIVE';
+            const positionsCount = SIMULATION_MODE ? virtualPositions.length : activePositions.length;
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'Online',
+                message: '🎯 Futures Oracle V22.7 - Ready',
+                mode: modeStatus, websocket: wsStatus,
+                last_update: Math.floor(wsAge / 1000) + 's ago',
+                active_positions: positionsCount,
+                max_positions: MAX_POSITIONS,
+                virtual_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
+                uptime: Math.floor(process.uptime()) + 's'
+            }));
+            return;
+        }
+
+        // 404: UNKNOWN ENDPOINT
+        console.log(`[UNKNOWN] ${req.method} ${parsedUrl.pathname}`);
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Endpoint not found' }));
     });
 
     server.listen(PORT, () => {
