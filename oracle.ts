@@ -1550,9 +1550,10 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
         res.end(JSON.stringify({ error: 'Endpoint not found' }));
     });
 
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
         const modeTag = SIMULATION_MODE ? '🎮 [SIMULATION]' : '💵 [LIVE]';
         console.log(`✅ [FUTURES ORACLE] ${modeTag} Captain's Log active on port ${PORT}`);
+        console.log(`🌐 [SERVER] Listening on 0.0.0.0:${PORT} - accessible from all interfaces`);
         console.log(`🎯 Oracle watching markets - Ready for signals`);
     });
 }
