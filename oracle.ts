@@ -1633,7 +1633,13 @@ function runStartupCheck() {
 
 // --- MARKET PULSE (VISIBILITY LOOP) ---
 function logMarketPulse() {
-    if (!wsConnected || prices.size === 0) return;
+    // DIAGNOSTIC: Always log that function was called  
+    console.log(`[DEBUG] logMarketPulse called - wsConnected: ${wsConnected}, prices.size: ${prices.size}`);
+
+    if (!wsConnected || prices.size === 0) {
+        console.log(`[DEBUG] logMarketPulse SKIPPED - wsConnected: ${wsConnected}, prices.size: ${prices.size}`);
+        return;
+    }
 
     console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
     const now = Date.now();
@@ -1646,6 +1652,7 @@ function logMarketPulse() {
         monitor.logPairStatus(pair, currentPrice);
     });
     console.log('--------------------------------------------------');
+    console.log(`[DEBUG] logMarketPulse completed successfully`);
 }
 
 // Start pulse after 15 seconds (give time to accumulate data)
