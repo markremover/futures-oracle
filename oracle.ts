@@ -9,7 +9,7 @@ import crypto from 'crypto';
 const PORT = 3001;
 const WS_URL = 'wss://advanced-trade-ws.coinbase.com';
 const TARGET_PAIRS = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'SUI-USD'];
-const N8N_WEBHOOK_BASE = 'http://n8n:5678/webhook';
+const N8N_WEBHOOK_BASE = 'http://172.17.0.1:5678/webhook/futurec-trigger-';
 const STOCK_WATCHLIST = ['QQQ', 'NVDA', 'AAPL', 'MSTR', 'COIN', '^TNX', 'DX-Y.NYB']; // Stocks, US10Y, DXY
 
 // --- COINBASE API ---
@@ -183,7 +183,10 @@ class PriceMonitor {
         return sum / period;
     }
 
-    private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number }): string | null {
+    private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number } | null): string | null {
+        // If no trend data available, allow signal (don't block)
+        if (!trendData) return null;
+
         const { sma200_1h, sma200_4h, currentPrice } = trendData;
 
         // Block LONG signals in downtrend (price below SMA200 on both timeframes)
@@ -209,22 +212,22 @@ class PriceMonitor {
             return;
         }
 
-        // TREND PROTECTION: Check SMA200 before sending signal
+        // TREND PROTECTION: Check SMA200 before sending signal (NON-BLOCKING)
         console.log(`🔍 [TREND CHECK] Analyzing ${pair} trend before signal...`);
         const trendData = await this.getTrendData(pair);
 
         if (!trendData) {
-            console.log(`⚠️  [TREND WARNING] Could not fetch trend data for ${pair} - BLOCKING signal as safety measure`);
-            return;
+            console.log(`⚠️  [TREND WARNING] Could not fetch trend data for ${pair} - ALLOWING signal (trend check skipped)`);
+            // Continue anyway - don't block signal if trend data unavailable
+        } else {
+            const blockReason = this.shouldBlockSignal(pair, trendData);
+            if (blockReason) {
+                console.log(`🚫 [BLOCKED] ${pair} signal blocked: ${blockReason}`);
+                return;
+            }
+            // Fix: Only access properties if trendData exists
+            console.log(`✅ [TREND OK] ${pair} passed trend check - Price: ${trendData.currentPrice.toFixed(2)}, SMA200_1h: ${trendData.sma200_1h.toFixed(2)}, SMA200_4h: ${trendData.sma200_4h.toFixed(2)}`);
         }
-
-        const blockReason = this.shouldBlockSignal(pair, trendData);
-        if (blockReason) {
-            console.log(`🚫 [BLOCKED] ${pair} signal blocked: ${blockReason}`);
-            return;
-        }
-
-        console.log(`✅ [TREND OK] ${pair} passed trend check - Price: ${trendData.currentPrice.toFixed(2)}, SMA200_1h: ${trendData.sma200_1h.toFixed(2)}, SMA200_4h: ${trendData.sma200_4h.toFixed(2)}`);
         console.log(`🚀 [ALERT] ${pair} triggered ${type}: ${value.toFixed(2)}% (Threshold checked)`);
         this.lastAlert.set(pair, now);
 
@@ -1471,6 +1474,10 @@ function connectWs() {
         lastWsUpdate = Date.now();
         try {
             const msg = JSON.parse(data.toString());
+
+            // DEBUG: Log all messages to diagnose Pairs: 0 issue
+            console.log(`[WS DEBUG] Message type: ${msg.type || msg.channel}, keys: ${Object.keys(msg).join(', ')}`);
+
             if (msg.channel === 'ticker' && msg.events) {
                 for (const event of msg.events) {
                     if (event.type === 'update' || event.type === 'snapshot') {
