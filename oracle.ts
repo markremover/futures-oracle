@@ -1633,26 +1633,15 @@ function runStartupCheck() {
 
 // --- MARKET PULSE (VISIBILITY LOOP) ---
 function logMarketPulse() {
-    // DIAGNOSTIC: Always log that function was called  
-    console.log(`[DEBUG] logMarketPulse called - wsConnected: ${wsConnected}, prices.size: ${prices.size}`);
-
-    if (!wsConnected || prices.size === 0) {
-        console.log(`[DEBUG] logMarketPulse SKIPPED - wsConnected: ${wsConnected}, prices.size: ${prices.size}`);
-        return;
-    }
+    if (!wsConnected || prices.size === 0) return;
 
     console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
-    const now = Date.now();
 
     TARGET_PAIRS.forEach(pair => {
         const currentPrice = prices.get(pair) || 0;
-        // Access private history via monitor instance (need to expose it or move this logic)
-        // Since history is private in PriceMonitor, we'll just log the Price for now
-        // To do this properly, let's add a public method to PriceMonitor
         monitor.logPairStatus(pair, currentPrice);
     });
     console.log('--------------------------------------------------');
-    console.log(`[DEBUG] logMarketPulse completed successfully`);
 }
 
 // Start pulse after 15 seconds (give time to accumulate data)
