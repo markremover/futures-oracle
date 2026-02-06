@@ -1601,6 +1601,24 @@ function runStartupCheck() {
     }, 10000);
 }
 
+// --- MARKET PULSE (VISIBILITY LOOP) ---
+function logMarketPulse() {
+    if (!wsConnected || prices.size === 0) return;
+
+    console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
+    const now = Date.now();
+
+    TARGET_PAIRS.forEach(pair => {
+        const currentPrice = prices.get(pair) || 0;
+        // Access private history via monitor instance (need to expose it or move this logic)
+        // Since history is private in PriceMonitor, we'll just log the Price for now
+        // To do this properly, let's add a public method to PriceMonitor
+        monitor.logPairStatus(pair, currentPrice);
+    });
+    console.log('--------------------------------------------------');
+}
+setInterval(logMarketPulse, 60000); // Pulse every 1 min
+
 // --- MAIN ---
 startServer();
 connectWs();
