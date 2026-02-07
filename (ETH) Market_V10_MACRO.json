@@ -176,7 +176,7 @@
     {
       "parameters": {
         "chatId": "5687487073",
-        "text": "={{$json.success ? '✅ ORDER EXECUTED' : '❌ ORDER FAILED'}}\\n\\n📊 Pair: {{$json.pair}}\\n🔵 Signal: {{$json.side || 'WAIT'}}\\n💰 Entry: ${{$json.entry_price}}\\n🆔 Order ID: {{$json.order_id}}\\n📦 Contracts: {{$json.contracts}}\\n🛑 SL: ${{$json.sl_price}} | 🎯 TP: ${{$json.tp_price}}\\n💵 Margin: ${{$json.margin_used}}\\n{{$json.mode === 'SIMULATION' ? '🎮 TEST MODE' : '💵 LIVE MODE'}}",
+        "text": "{{$json.message}}",
         "additionalFields": {
           "parse_mode": "HTML"
         }

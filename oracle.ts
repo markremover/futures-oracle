@@ -146,7 +146,7 @@ class PriceMonitor {
                 // Log Result
                 console.log(`🏁 [GHOST RESULT] ${pair} ${result} | ${sign}$${netPnl.toFixed(2)} | Duration: ${durationStr}`);
 
-                // Send Webhook
+                // Send Webhook with NEW FORMAT
                 const symbol = pair.split('-')[0].toLowerCase();
                 const url = `${N8N_WEBHOOK_BASE}${symbol}`;
 
@@ -160,7 +160,8 @@ class PriceMonitor {
                         pnl: netPnl.toFixed(2),
                         result,
                         duration: durationStr,
-                        message: `🏁 [GHOST RESULT] ${pair}\nStatus: ${result} ${emoji}\nOutcome: ${sign}$${netPnl.toFixed(2)} (Net)\nEntry: $${pos.entryPrice}\nExit: $${currentPrice}\nLeverage: x${(pos.entryPrice * pos.contracts / 1400).toFixed(1)}\nDuration: ${durationStr}\nFees: -$${fees.toFixed(2)}`
+                        // NEW REPORT FORMAT
+                        message: `🏁 [GHOST RESULT] ${pair}\nStatus: ${result === 'WIN' ? 'PROFIT 💰' : 'LOSS 💀'}\nOutcome: ${sign}$${netPnl.toFixed(2)}\nExit Price: $${currentPrice}\nDuration: ${durationStr}`
                     });
                 } catch (e) {
                     // ignore webhook error
@@ -245,9 +246,9 @@ class PriceMonitor {
         if (contracts <= 0) return;
 
 
-        // Leverage Calc
+        // Leverage Calc (Based on Sim Balance $1400 as requested)
         const notional = contracts * price;
-        const leverage = notional / SIM_BALANCE; // Based on $1400
+        const leverage = notional / SIM_BALANCE;
 
         // Add to Memory
         const orderId = `SIM-${now}`;
@@ -259,14 +260,14 @@ class PriceMonitor {
         // Calc Projected PnL for Report
         const tpPnl = Math.abs(tpPrice - price) * contracts;
         const slPnl = Math.abs(slPrice - price) * contracts;
-        const margin = notional / 10; // Mock 10x margin usage
+        // Margin for display: 10x assumed
+        const margin = notional / 10;
 
-        const emoji = side === 'BUY' ? '🟢' : '🔴';
-        const failEmoji = side === 'BUY' ? '📉' : '📈';
+        const emoji = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
 
         console.log(`🚀 [ORDER SENT] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)}) | TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`);
 
-        // --- V22 REPORTING: OPEN ---
+        // --- V23 REPORTING: OPEN ---
         const symbol = pair.split('-')[0].toLowerCase();
         const url = `${N8N_WEBHOOK_BASE}${symbol}`;
 
@@ -282,7 +283,8 @@ class PriceMonitor {
                 sl_price: slPrice,
                 risk: riskPerTrade,
                 timestamp: now,
-                message: `🚀 [ORDER SENT] ${pair}\nType: ${side} ${emoji}\nEntry: $${price}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(2)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(2)})`
+                // NEW REPORT FORMAT
+                message: `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`
             });
         } catch (e: any) {
             console.error(`❌ [WEBHOOK FAILED]`, e.message);
@@ -763,7 +765,7 @@ function monitorVirtualPositions() {
             updateTradeResult(pos.pair, isWin ? 'WIN' : 'LOSS', pnl);
             slCooldowns.set(pos.pair, Date.now());
 
-            // --- V22 REPORTING: FINAL RESULT ---
+            // --- V23 REPORTING: FINAL RESULT ---
             const symbol = pos.pair.split('-')[0].toLowerCase();
             const url = `${N8N_WEBHOOK_BASE}${symbol}`;
             try {
@@ -774,7 +776,8 @@ function monitorVirtualPositions() {
                     pnl: pnl.toFixed(2),
                     exit_price: currentPrice,
                     balance: simBalance.toFixed(2),
-                    message: `🎯 [ORACLE RESULT] ${pos.pair} ${resultEmoji}\nStatus: ${isWin ? 'TP HIT' : 'SL HIT'}\nProfit/Loss: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}\nFinal Price: $${currentPrice}`
+                    // NEW REPORT FORMAT
+                    message: `🏁 [GHOST RESULT] ${pos.pair}\nStatus: ${isWin ? 'PROFIT 💰' : 'LOSS 💀'}\nOutcome: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\nExit Price: $${currentPrice}\nDuration: 0m 0s (approx)`
                 });
             } catch (e: any) {
                 console.error(`❌ [WEBHOOK FAILED]`, e.message);
@@ -1208,6 +1211,12 @@ function startServer() {
 
                     // === SUCCESS RESPONSE ===
                     res.writeHead(200, { 'Content-Type': 'application/json' });
+
+                    // PnL for Report
+                    const tpPnl = Math.abs(parseFloat(tpPrice.toFixed(2)) - filledPrice) * contracts;
+                    const slPnl = Math.abs(parseFloat(slPrice.toFixed(2)) - filledPrice) * contracts;
+                    const emoji = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
+
                     res.end(JSON.stringify({
                         success: true,
                         order_id: orderId,
@@ -1221,8 +1230,10 @@ function startServer() {
                         actual_risk: parseFloat(actualRisk.toFixed(2)),
                         margin_used: parseFloat(marginRequired.toFixed(2)),
                         leverage: leverage,
-                        mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE', // Ghost Sniper indicator
-                        sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined
+                        mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE',
+                        sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
+                        // NEW REPORT FORMAT
+                        message: `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nMargin: $${(notional / 10).toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`
                     }));
 
                     const modeTag = SIMULATION_MODE ? '🎮 [SIM]' : '💵 [LIVE]';
