@@ -125,7 +125,7 @@ class PriceMonitor {
 
         if (absChange >= threshold) {
             const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
-            console.log(`🚀 [ORACLE TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
+            // console.log(`🚀 [ORACLE TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
 
             this.triggerSimTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
         }
