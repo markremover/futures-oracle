@@ -733,60 +733,6 @@ function removePosition(orderId: string, hitSl: boolean = false) {
 
 // --- GHOST SNIPER: VIRTUAL POSITION MONITOR ---
 
-// --- ORACLE FUTURES: ACTIVE SIMULATION MONITOR (V22) ---
-
-function monitorVirtualPositions() {
-    if (!SIMULATION_MODE || virtualPositions.length === 0) return;
-
-    virtualPositions.forEach(async (pos, index) => {
-        const currentPrice = prices.get(pos.pair);
-        if (!currentPrice) return;
-
-        const priceDiff = pos.side === 'BUY' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
-        pos.unrealizedPnl = priceDiff * pos.contracts;
-
-        const slHit = pos.side === 'BUY' ? currentPrice <= (pos.slPrice || 0) : currentPrice >= (pos.slPrice || 0);
-        const tpHit = pos.side === 'BUY' ? currentPrice >= (pos.tpPrice || 999999) : currentPrice <= (pos.tpPrice || 0);
-
-        if (slHit || tpHit) {
-            const isWin = tpHit;
-            const pnl = isWin
-                ? ((pos.tpPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1)
-                : ((pos.slPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
-
-            simBalance += pnl;
-            totalVirtualPnl += pnl;
-
-            const resultEmoji = isWin ? "✅ WIN" : "❌ LOSS";
-            console.log(`🎯 [ORACLE RESULT] ${pos.pair} ${resultEmoji} | PnL: $${pnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
-
-            // REMOVE FROM LIST
-            virtualPositions.splice(index, 1);
-            updateTradeResult(pos.pair, isWin ? 'WIN' : 'LOSS', pnl);
-            slCooldowns.set(pos.pair, Date.now());
-
-            // --- V23 REPORTING: FINAL RESULT ---
-            const symbol = pos.pair.split('-')[0].toLowerCase();
-            const url = `${N8N_WEBHOOK_BASE}${symbol}`;
-            try {
-                await axios.post(url, {
-                    type: 'ORACLE_CLOSE',
-                    pair: pos.pair,
-                    result: isWin ? 'TP_HIT' : 'SL_HIT',
-                    pnl: pnl.toFixed(2),
-                    exit_price: currentPrice,
-                    balance: simBalance.toFixed(2),
-                    // NEW REPORT FORMAT
-                    message: `🏁 [GHOST RESULT] ${pos.pair}\nStatus: ${isWin ? 'PROFIT 💰' : 'LOSS 💀'}\nOutcome: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}\nExit Price: $${currentPrice}\nDuration: 0m 0s (approx)`
-                });
-            } catch (e: any) {
-                console.error(`❌ [WEBHOOK FAILED]`, e.message);
-            }
-        }
-    });
-}
-setInterval(monitorVirtualPositions, 2000); // Check every 2s
-
 
 // --- SERVER ---
 function startServer() {
