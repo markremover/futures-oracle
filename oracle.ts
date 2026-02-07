@@ -8,7 +8,7 @@ import crypto from 'crypto';
 // --- CONFIG ---
 const PORT = 3001;
 const WS_URL = 'wss://advanced-trade-ws.coinbase.com';
-const TARGET_PAIRS = ['SOL-USD', 'XRP-USD', 'SUI-USD', 'DOGE-USD', 'ETH-USD'];
+const TARGET_PAIRS = ['ETH-USD', 'SOL-USD', 'XRP-USD', 'SUI-USD', 'DOGE-USD'];
 const N8N_WEBHOOK_BASE = 'http://172.17.0.1:5678/webhook/futurec-trigger-';
 const STOCK_WATCHLIST = ['QQQ', 'NVDA', 'AAPL', 'MSTR', 'COIN', '^TNX', 'DX-Y.NYB']; // Stocks, US10Y, DXY
 
@@ -1667,6 +1667,21 @@ function logMarketPulse() {
         monitor.logPairStatus(pair, currentPrice);
     });
     console.log('--------------------------------------------------');
+}
+
+
+// --- MARKET PULSE (VISIBILITY LOOP) ---
+function logMarketPulse() {
+    if (!wsConnected || prices.size === 0) return;
+
+    // Header removed to fit all 5 pairs in dashboard (tail -5)
+    // console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
+
+    TARGET_PAIRS.forEach(pair => {
+        const currentPrice = prices.get(pair) || 0;
+        monitor.logPairStatus(pair, currentPrice);
+    });
+    // console.log('--------------------------------------------------');
 }
 
 // Start pulse after 15 seconds (give time to accumulate data)
