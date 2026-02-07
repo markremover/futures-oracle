@@ -1,5 +1,5 @@
 {
-  "name": "(SUI) Market_V10_MACRO",
+  "name": "(SUI) Market_V23_MACRO",
   "nodes": [
     {
       "parameters": {
@@ -175,7 +175,7 @@
     },
     {
       "parameters": {
-        "chatId": "5687487073",
+        "chatId": "-5238546812",
         "text": "{{$json.message}}",
         "additionalFields": {
           "parse_mode": "HTML"

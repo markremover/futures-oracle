@@ -1,5 +1,5 @@
 {
-  "name": "(SOL) Market_V10_MACRO",
+  "name": "(XRP) Market_V23_MACRO",
   "nodes": [
     {
       "parameters": {
@@ -17,7 +17,7 @@
             },
             {
               "name": "pair",
-              "value": "SOL-PERP"
+              "value": "XRP-PERP"
             }
           ]
         },
@@ -26,10 +26,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        0,
-        0
+        -80,
+        336
       ],
-      "id": "ebf13d32-89ad-4de3-9b0c-0655a8498154",
+      "id": "9e954d40-cca5-4ae9-822a-30df3a462f17",
       "name": "Historical Candles"
     },
     {
@@ -40,7 +40,7 @@
           "parameters": [
             {
               "name": "pair",
-              "value": "SOL-PERP"
+              "value": "XRP-PERP"
             }
           ]
         },
@@ -51,10 +51,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        160,
-        0
+        80,
+        336
       ],
-      "id": "1774e97d-4e2d-48b3-8cd6-c1c41417d97a",
+      "id": "53043674-ad4d-4300-910f-4f3429ef4bab",
       "name": "Current_Price",
       "retryOnFail": true,
       "maxTries": 5,
@@ -63,18 +63,18 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "futurec-trigger-sol",
+        "path": "futurec-trigger-xrp",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        -192,
-        0
+        -272,
+        336
       ],
       "name": "Webhook",
-      "id": "dfbb9aff-63a6-4400-8e7d-bc4225860680",
-      "webhookId": "deb1915d-74d5-45a2-85b6-b8343e11ba25"
+      "id": "7df63099-9360-40e6-b5d8-f2f0e0607773",
+      "webhookId": "5a79f66e-c586-44d6-8c3d-57051864a0e9"
     },
     {
       "parameters": {
@@ -84,10 +84,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        480,
-        0
+        400,
+        336
       ],
-      "id": "ab0f97fa-af93-45f4-9eb5-45181d15f856",
+      "id": "6dfecb30-135b-45c2-aa91-dbdfc2d758f7",
       "name": "F&G Index"
     },
     {
@@ -98,10 +98,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        672,
-        0
+        592,
+        336
       ],
-      "id": "80d8369f-c5c3-4cb4-a35f-0798d5c25c52",
+      "id": "3e607a88-1ec8-4b65-8332-8e7aecd27367",
       "name": "News/Sentiment"
     },
     {
@@ -112,10 +112,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        864,
-        0
+        784,
+        336
       ],
-      "id": "261a64fd-2e4e-410b-bba6-07b1f4b8c8ea",
+      "id": "4f0d7e6e-84c7-4478-8182-c16790e688eb",
       "name": "Macro Calendar"
     },
     {
@@ -154,10 +154,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        32,
-        208
+        -48,
+        544
       ],
-      "id": "eb33d7e5-0841-4219-8a73-4d54695f78a5",
+      "id": "f701b9cc-1ec2-42e9-a9cd-69558ea25435",
       "name": "Risk Filter"
     },
     {
@@ -167,15 +167,15 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        320,
-        0
+        240,
+        336
       ],
-      "id": "1e97dd10-d4c1-4255-a7ba-8c164a6be8b1",
+      "id": "061ee267-9f49-4885-864e-6ad7ea1a25ba",
       "name": "Code/Function (ATR/RSI Filter)"
     },
     {
       "parameters": {
-        "chatId": "5687487073",
+        "chatId": "-5238546812",
         "text": "{{$json.message}}",
         "additionalFields": {
           "parse_mode": "HTML"
@@ -184,10 +184,10 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        640,
-        192
+        560,
+        528
       ],
-      "id": "f53bac4f-f741-4e32-816d-23497e315756",
+      "id": "4c0c3e3b-7562-4440-b466-72d431fe5bfc",
       "name": "Telegram (Report)",
       "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
       "credentials": {
@@ -204,10 +204,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -160,
-        208
+        -240,
+        544
       ],
-      "id": "d1a54194-4b1b-4ac6-bed2-084c31749fb8",
+      "id": "9fcfd181-6bce-4c14-aabe-129c27c0c6e9",
       "name": "Parser"
     },
     {
@@ -218,10 +218,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1056,
-        0
+        976,
+        336
       ],
-      "id": "5c390023-1f75-4b8c-bf8a-483c8b365277",
+      "id": "6916201e-1e1a-4693-8caf-d0cee47582d9",
       "name": "Market Context"
     },
     {
@@ -236,10 +236,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1248,
-        0
+        1168,
+        336
       ],
-      "id": "bfe0cfd9-d47f-4ccc-b878-d45c438f4cff",
+      "id": "fa07fbf6-db76-44d8-9509-9998ced0d2f1",
       "name": "HTTP Request"
     },
     {
@@ -248,16 +248,16 @@
         "url": "http://172.17.0.1:3001/execute-order",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"SOL-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
+        "jsonBody": "={\n  \"pair\": \"XRP-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        240,
-        192
+        160,
+        528
       ],
-      "id": "execute-order-sol-1769394496453",
+      "id": "execute-order-xrp-1769394496455",
       "name": "Execute Order (Oracle API)"
     }
   ],
@@ -401,11 +401,11 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "47451cba-01b7-4574-b387-b1ca34c92efd",
+  "versionId": "d1c7220d-558c-4000-a86a-f802ecd94211",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "dbc77a83d2b4b81619f9b25f03d3eb04bad62bf94cb1838a3d14a7b99cb0d36c"
   },
-  "id": "ai3qVeakS2uQaiiz",
+  "id": "dCkN4uxMSdUG665J",
   "tags": []
 }

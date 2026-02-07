@@ -1,5 +1,5 @@
 {
-  "name": "(ETH) Market_V10_MACRO",
+  "name": "(DOGE) Market_V23_MACRO",
   "nodes": [
     {
       "parameters": {
@@ -17,7 +17,7 @@
             },
             {
               "name": "pair",
-              "value": "ETH-PERP"
+              "value": "DOGE-PERP"
             }
           ]
         },
@@ -26,10 +26,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2560,
-        304
+        1280,
+        48
       ],
-      "id": "35e71528-661e-474f-bcd9-37ea278eacf8",
+      "id": "5a785cad-3c7b-4cd4-acda-45328b7a64cd",
       "name": "Historical Candles"
     },
     {
@@ -40,7 +40,7 @@
           "parameters": [
             {
               "name": "pair",
-              "value": "ETH-PERP"
+              "value": "DOGE-PERP"
             }
           ]
         },
@@ -51,10 +51,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2720,
-        304
+        1440,
+        48
       ],
-      "id": "c1671dae-b34a-4ee3-805e-5910b06bce01",
+      "id": "0c023a26-4d23-494c-b28e-b790de1e031a",
       "name": "Current_Price",
       "retryOnFail": true,
       "maxTries": 5,
@@ -63,18 +63,18 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "futurec-trigger-eth",
+        "path": "futurec-trigger-doge",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        2368,
-        304
+        1072,
+        48
       ],
       "name": "Webhook",
-      "id": "92cfd4a0-7b13-427d-acff-81538248ff4b",
-      "webhookId": "4b9f4cde-637e-49fd-8239-5b5470b544db"
+      "id": "c9652b68-1c7a-4d31-8a36-2264bc643334",
+      "webhookId": "a6246edd-90d5-4f60-a5ca-aea27cfb1511"
     },
     {
       "parameters": {
@@ -84,10 +84,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        3040,
-        304
+        1760,
+        48
       ],
-      "id": "ae12f9d3-fccc-41ac-baad-f6ffd9b26da6",
+      "id": "f7461c4f-0e72-49d1-bd26-4bc3b794e933",
       "name": "F&G Index"
     },
     {
@@ -98,10 +98,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        3232,
-        304
+        1952,
+        48
       ],
-      "id": "e9f05b54-dad6-400d-92ee-52b1942b13c4",
+      "id": "c296ab82-87a4-483c-9d74-5d0d0cd52132",
       "name": "News/Sentiment"
     },
     {
@@ -112,10 +112,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        3424,
-        304
+        2144,
+        48
       ],
-      "id": "c314fe90-5aa1-4dcd-ac22-87859881f797",
+      "id": "ee05ce63-6b2d-4814-b205-87d5b900bfcc",
       "name": "Macro Calendar"
     },
     {
@@ -154,28 +154,28 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2592,
-        512
+        1312,
+        256
       ],
-      "id": "84ccffb8-107f-4f3a-b455-2161c0514ac1",
+      "id": "93b03dc0-b528-4a4f-b1f6-ec6908932ce4",
       "name": "Risk Filter"
     },
     {
       "parameters": {
-        "jsCode": "// --- CONFIGURATION ---\nconst PERIOD = 14;\nconst ATR_MAX_THRESHOLD = 0.03; \nconst RSI_NEUTRAL_MIN = 48;\nconst RSI_NEUTRAL_MAX = 52;\n\n// --- GET DATA FROM CANDLES ---\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\n// --- GET ORIGINAL WEBHOOK DATA (Pass-Through) ---\n// CRITICAL FIX: Preserve 'source' field from Webhook (Current_Price overwrites it)\nlet webhookData = {};\nlet originalSource = 'LIVE'; // Default\ntry {\n    const whData = $('Webhook').first().json;\n    webhookData = whData;\n    originalSource = whData.source || 'LIVE';\n} catch (e) {}\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    // Index 0 is the most recent candle in Coinbase API\n    const lastCandle = candleData[0]; \n    // Support both Finnhub {c:[]} and Coinbase [[t,l,h,o,c,v]] formats\n    if (Array.isArray(lastCandle)) {\n        current_price = parseFloat(lastCandle[4]); // Coinbase\n    } else {\n        current_price = parseFloat(lastCandle['c'] || 0); // Flat object fallback\n    }\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\n// --- PARSE CANDLES FOR CALCULATION ---\n// Handle Coinbase Format [[time, low, high, open, close, vol], ...]\nconst candles = candleData.map(c => ({\n    close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c['4'] || c.close || 0),\n    high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c['2'] || c.high || 0),\n    low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c['1'] || c.low || 0)\n}));\n\n// --- CALCULATION FUNCTIONS ---\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    ...webhookData,\n    source: originalSource, // <--- FORCE OVERRIDE: Restore original source from Webhook\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
+        "jsCode": "// --- CONFIGURATION ---\nconst PERIOD = 14;\nconst ATR_MAX_THRESHOLD = 0.03; \nconst RSI_NEUTRAL_MIN = 48;\nconst RSI_NEUTRAL_MAX = 52;\n\n// --- GET DATA FROM CANDLES ---\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\n// --- GET ORIGINAL WEBHOOK DATA (Pass-Through) ---\n// Fix: Grab data from Webhook to ensure trend/status aren't lost in Test Mode\nlet webhookData = {};\ntry {\n    webhookData = $('Webhook').first().json;\n} catch (e) {}\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    // Index 0 is the most recent candle in Coinbase API\n    const lastCandle = candleData[0]; \n    // Support both Finnhub {c:[]} and Coinbase [[t,l,h,o,c,v]] formats\n    if (Array.isArray(lastCandle)) {\n        current_price = parseFloat(lastCandle[4]); // Coinbase\n    } else {\n        current_price = parseFloat(lastCandle['c'] || 0); // Flat object fallback\n    }\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\n// --- PARSE CANDLES FOR CALCULATION ---\n// Handle Coinbase Format [[time, low, high, open, close, vol], ...]\nconst candles = candleData.map(c => ({\n    close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c['4'] || c.close || 0),\n    high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c['2'] || c.high || 0),\n    low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c['1'] || c.low || 0)\n}));\n\n// --- CALCULATION FUNCTIONS ---\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    ...webhookData, // <--- CRITICAL FIX: Pass through original fields (trend, etc.)\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2880,
-        304
+        1600,
+        48
       ],
-      "id": "99425ffb-3ef9-4fec-9a4a-81548eb856d5",
+      "id": "15b4dc47-29f3-48b2-ba6c-a96313f55139",
       "name": "Code/Function (ATR/RSI Filter)"
     },
     {
       "parameters": {
-        "chatId": "5687487073",
+        "chatId": "-5238546812",
         "text": "{{$json.message}}",
         "additionalFields": {
           "parse_mode": "HTML"
@@ -184,10 +184,10 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        3200,
-        496
+        1920,
+        240
       ],
-      "id": "35bb144d-58ff-4ba0-afd3-ba32a81cde1d",
+      "id": "faf1e84f-2401-4624-b2c3-7fcc1ed5b16a",
       "name": "Telegram (Report)",
       "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
       "credentials": {
@@ -204,10 +204,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2400,
-        512
+        1120,
+        256
       ],
-      "id": "87a772fa-f337-4fc9-9b43-8ab13c14551e",
+      "id": "0ca54cec-6884-4642-8329-b7a39cdad543",
       "name": "Parser"
     },
     {
@@ -218,10 +218,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        3616,
-        304
+        2336,
+        48
       ],
-      "id": "58241d10-a221-40b1-95aa-f4bb7c21c29f",
+      "id": "0021b308-2112-4983-977c-f049533dc33e",
       "name": "Market Context"
     },
     {
@@ -230,16 +230,16 @@
         "url": "http://172.17.0.1:3001/analyze",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"source\": \"{{ $('Webhook').first().json.source || 'LIVE' }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyD4bQ1aUJwlYmiN7ihXfdbE6oj2iHpSXOc\"\n}",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyD4bQ1aUJwlYmiN7ihXfdbE6oj2iHpSXOc\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        3808,
-        304
+        2528,
+        48
       ],
-      "id": "483d1dc4-4c96-425e-8994-6118af8fae6e",
+      "id": "d4329182-26ff-4302-836b-b0bc42c27c74",
       "name": "HTTP Request"
     },
     {
@@ -248,32 +248,21 @@
         "url": "http://172.17.0.1:3001/execute-order",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"ETH-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
+        "jsonBody": "={\n  \"pair\": \"DOGE-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        2800,
-        496
+        1520,
+        240
       ],
-      "id": "execute-order-eth-1769394496451",
+      "id": "execute-order-doge-1769394496457",
       "name": "Execute Order (Oracle API)"
     }
   ],
   "pinData": {},
   "connections": {
-    "Webhook": {
-      "main": [
-        [
-          {
-            "node": "Historical Candles",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Historical Candles": {
       "main": [
         [
@@ -384,6 +373,17 @@
         ]
       ]
     },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Historical Candles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Execute Order (Oracle API)": {
       "main": [
         [
@@ -401,11 +401,11 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "d3d64d23-74b4-4c0b-a453-797aa95a601c",
+  "versionId": "5b2e46b4-705e-48f8-b17e-af869683a79a",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "dbc77a83d2b4b81619f9b25f03d3eb04bad62bf94cb1838a3d14a7b99cb0d36c"
   },
-  "id": "ItU8qRxX5QY0V6Xk",
+  "id": "QhJk6MP2c9IBYgFl",
   "tags": []
 }
