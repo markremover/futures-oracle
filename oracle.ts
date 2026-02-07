@@ -99,7 +99,77 @@ class PriceMonitor {
             buffer.shift();
         }
 
+        // CHECK OPEN POSITIONS (GHOST TRACKING)
+        this.checkPositions(pair, price);
+
         this.checkVelocity(pair, price, buffer);
+    }
+
+    private async checkPositions(pair: string, currentPrice: number) {
+        // Iterate backwards to allow removal
+        for (let i = virtualPositions.length - 1; i >= 0; i--) {
+            const pos = virtualPositions[i];
+            if (pos.pair !== pair) continue;
+
+            let result: 'WIN' | 'LOSS' | null = null;
+            let exitPrice = currentPrice;
+
+            // Check SL/TP
+            if (pos.side === 'BUY') {
+                if (currentPrice >= pos.tpPrice) result = 'WIN';
+                else if (currentPrice <= pos.slPrice) result = 'LOSS';
+            } else { // SELL
+                if (currentPrice <= pos.tpPrice) result = 'WIN';
+                else if (currentPrice >= pos.slPrice) result = 'LOSS';
+            }
+
+            if (result) {
+                // CLOSE POSITION
+                const durationMs = Date.now() - pos.timestamp;
+                const durationMin = Math.floor(durationMs / 60000);
+                const durationSec = Math.floor((durationMs % 60000) / 1000);
+                const durationStr = `${durationMin}m ${durationSec}s`;
+
+                // PnL Calculation
+                // PnL = (Exit - Entry) * Contracts * (Side direction)
+                const priceDiff = currentPrice - pos.entryPrice;
+                const rawPnl = priceDiff * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
+
+                // Fees (0.06% Taker on Entry + Exit)
+                const volume = (pos.entryPrice + currentPrice) * pos.contracts;
+                const fees = volume * 0.0006;
+                const netPnl = rawPnl - fees;
+
+                const emoji = result === 'WIN' ? '💰' : '💀';
+                const sign = netPnl >= 0 ? '+' : '';
+
+                // Log Result
+                console.log(`🏁 [GHOST RESULT] ${pair} ${result} | ${sign}$${netPnl.toFixed(2)} | Duration: ${durationStr}`);
+
+                // Send Webhook
+                const symbol = pair.split('-')[0].toLowerCase();
+                const url = `${N8N_WEBHOOK_BASE}${symbol}`;
+
+                try {
+                    await axios.post(url, {
+                        type: 'ORACLE_CLOSE',
+                        pair,
+                        side: pos.side,
+                        entry_price: pos.entryPrice,
+                        exit_price: currentPrice,
+                        pnl: netPnl.toFixed(2),
+                        result,
+                        duration: durationStr,
+                        message: `🏁 [GHOST RESULT] ${pair}\nStatus: ${result} ${emoji}\nOutcome: ${sign}$${netPnl.toFixed(2)} (Net)\nEntry: $${pos.entryPrice}\nExit: $${currentPrice}\nLeverage: x${(pos.entryPrice * pos.contracts / 1400).toFixed(1)}\nDuration: ${durationStr}\nFees: -$${fees.toFixed(2)}`
+                    });
+                } catch (e) {
+                    // ignore webhook error
+                }
+
+                // Remove from active
+                virtualPositions.splice(i, 1);
+            }
+        }
     }
 
     private async checkVelocity(pair: string, currentPrice: number, buffer: { time: number, price: number }[]) {
@@ -174,6 +244,7 @@ class PriceMonitor {
 
         if (contracts <= 0) return;
 
+
         // Leverage Calc
         const notional = contracts * price;
         const leverage = notional / SIM_BALANCE; // Based on $1400
@@ -185,7 +256,15 @@ class PriceMonitor {
             slPrice, tpPrice, isSimulated: true
         });
 
-        console.log(`🧪 [ORACLE OPEN] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} | TP: ${tpPrice.toFixed(2)}`);
+        // Calc Projected PnL for Report
+        const tpPnl = Math.abs(tpPrice - price) * contracts;
+        const slPnl = Math.abs(slPrice - price) * contracts;
+        const margin = notional / 10; // Mock 10x margin usage
+
+        const emoji = side === 'BUY' ? '🟢' : '🔴';
+        const failEmoji = side === 'BUY' ? '📉' : '📈';
+
+        console.log(`🚀 [ORDER SENT] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)}) | TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`);
 
         // --- V22 REPORTING: OPEN ---
         const symbol = pair.split('-')[0].toLowerCase();
@@ -198,12 +277,12 @@ class PriceMonitor {
                 side,
                 entry_price: price,
                 leverage: leverage.toFixed(1),
-                margin: (notional / 10).toFixed(2), // Mock 10x margin usage
+                margin: margin.toFixed(2),
                 tp_price: tpPrice,
                 sl_price: slPrice,
                 risk: riskPerTrade,
                 timestamp: now,
-                message: `🧪 [ORACLE TEST] ${pair} | ${side}\nEntry: $${price}\nLeverage: x${leverage.toFixed(1)}\nTarget (TP): $${tpPrice.toFixed(2)} (Goal: +$20)\nRisk (SL): $${slPrice.toFixed(2)} (Risk: -$10)`
+                message: `🚀 [ORDER SENT] ${pair}\nType: ${side} ${emoji}\nEntry: $${price}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(2)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(2)})`
             });
         } catch (e: any) {
             console.error(`❌ [WEBHOOK FAILED]`, e.message);

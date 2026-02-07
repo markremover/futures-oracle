@@ -1,0 +1,16 @@
+Antigravity, we need to establish "IMMUTABLE PROJECT RULES" for Futures Oracle. 
+Create a file named 'PROJECT_GUIDELINES.md' in the root directory. 
+You MUST read and follow these rules before every coding task or deployment.
+
+RULES:
+1. NO MENU CHANGES: Never modify or delete the existing terminal menu interface. Keep all current functions intact.
+2. DEPLOYMENT PATH: All updates must be prepared for Google Cloud deployment. The process is: Local Update -> GitHub Push -> Google Cloud Pull/Deploy.
+3. SECURITY FIRST (GitHub Safety): 
+   - NEVER hardcode API keys or secrets in any .ts or .js file.
+   - Always use process.env for sensitive data. 
+   - Check .gitignore to ensure .env is never pushed to GitHub to prevent Google Cloud key blocking.
+4. N8N CONNECTIVITY: Before modifying Webhook logic, ensure the endpoint URL http://35.223.93.16:5678 remains consistent with our Docker network setup.
+5. NO RUSSIAN CHARACTERS: All code, comments, and logs must be in English ONLY.
+6. VERSIONING: Every time you provide a code block, add a comment at the top with the Version Number (e.g., // Version: V22.X).
+
+Confirm that you have saved these rules and will check them every time I ask for an update.
