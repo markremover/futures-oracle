@@ -1657,20 +1657,7 @@ function runStartupCheck() {
 }
 
 // --- MARKET PULSE (VISIBILITY LOOP) ---
-function logMarketPulse() {
-    if (!wsConnected || prices.size === 0) return;
 
-    console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
-
-    TARGET_PAIRS.forEach(pair => {
-        const currentPrice = prices.get(pair) || 0;
-        monitor.logPairStatus(pair, currentPrice);
-    });
-    console.log('--------------------------------------------------');
-}
-
-
-// --- MARKET PULSE (VISIBILITY LOOP) ---
 function logMarketPulse() {
     if (!wsConnected || prices.size === 0) return;
 
