@@ -1583,8 +1583,8 @@ function connectWs() {
         try {
             const msg = JSON.parse(data.toString());
 
-            // DEBUG: Log all messages to diagnose Pairs: 0 issue
-            console.log(`[WS DEBUG] Message type: ${msg.type || msg.channel}, keys: ${Object.keys(msg).join(', ')}`);
+            // DEBUG REMOVED: Clean logs requested
+            // console.log(`[WS DEBUG] Message type: ${msg.type || msg.channel}, keys: ${Object.keys(msg).join(', ')}`);
 
             if (msg.channel === 'ticker' && msg.events) {
                 for (const event of msg.events) {
