@@ -181,11 +181,11 @@ class PriceMonitor {
         const absChange = Math.abs(change);
 
         // --- V22 DYNAMIC THRESHOLD (BIDIRECTIONAL) ---
-        // Majors (ETH, SOL, XRP) -> 1.0% (TEST MODE)
-        // Volatile (DOGE, SUI)   -> 1.0% (TEST MODE)
-        let threshold = 1.0;
+        // Majors (ETH, SOL, XRP) -> 0.8%
+        // Volatile (DOGE, SUI)   -> 1.2%
+        let threshold = 0.8;
         if (pair.includes("DOGE") || pair.includes("SUI")) {
-            threshold = 1.0;
+            threshold = 1.2;
         }
 
         // Crash Protection Sensitivity
