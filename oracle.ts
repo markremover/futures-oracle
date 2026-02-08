@@ -1163,6 +1163,29 @@ function startServer() {
                     const slPnl = Math.abs(parseFloat(slPrice.toFixed(2)) - filledPrice) * contracts;
                     const emoji = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
 
+                    const messageReport = `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nMargin: $${(notional / 10).toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`;
+
+                    // OPTIONAL: Send direct report if requested (for Testing or Bypass)
+                    if (data.report_to_telegram) {
+                        const symbol = pair.split('-')[0].toLowerCase();
+                        const url = `${N8N_WEBHOOK_BASE}${symbol}`;
+                        // Async fire-and-forget
+                        axios.post(url, {
+                            type: 'ORACLE_OPEN',
+                            pair,
+                            side,
+                            entry_price: filledPrice,
+                            leverage: leverage.toFixed(1),
+                            margin: (notional / 10).toFixed(2),
+                            tp_price: tpPrice,
+                            sl_price: slPrice,
+                            risk: actualRisk,
+                            timestamp: Date.now(),
+                            message: messageReport
+                        }).catch(e => console.error(`❌ [DIRECT REPORT FAILED]`, e.message));
+                        console.log(`📤 [DIRECT REPORT] Sent to ${url}`);
+                    }
+
                     res.end(JSON.stringify({
                         success: true,
                         order_id: orderId,
@@ -1179,7 +1202,7 @@ function startServer() {
                         mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE',
                         sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
                         // NEW REPORT FORMAT
-                        message: `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nMargin: $${(notional / 10).toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`
+                        message: messageReport
                     }));
 
                     const modeTag = SIMULATION_MODE ? '🎮 [SIM]' : '💵 [LIVE]';

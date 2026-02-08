@@ -62,7 +62,7 @@ elif [ "$choice" == "2" ]; then
         # Valid payload for Oracle
         response=$(curl -s -X POST "$url" \
             -H "Content-Type: application/json" \
-            -d "{\"pair\":\"${coin}-USD\", \"signal\":\"BUY\", \"confidence\":\"TEST-100\"}")
+            -d "{\"pair\":\"${coin}-USD\", \"signal\":\"BUY\", \"confidence\":\"TEST-100\", \"report_to_telegram\": true}")
             
         echo -e "    ✅ Signal Sent. Check Telegram!"
         sleep 2
