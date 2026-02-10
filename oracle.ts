@@ -1198,6 +1198,7 @@ function startServer() {
                         atr: parseFloat(atr.toFixed(2)),
                         actual_risk: parseFloat(actualRisk.toFixed(2)),
                         margin_used: parseFloat(marginRequired.toFixed(2)),
+                        message: messageReport
                         leverage: leverage,
                         mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE',
                         sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
