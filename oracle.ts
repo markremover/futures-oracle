@@ -351,22 +351,58 @@ class PriceMonitor {
         }
     }
 
+    // Simple in-memory cache for candles: Key = "pair-granularity", Value = { timestamp, data }
+    private candleCache: Map<string, { timestamp: number, data: any[] }> = new Map();
+
     private async fetchCandles(pair: string, granularity: number, count: number): Promise<any[] | null> {
-        try {
-            const endTime = Math.floor(Date.now() / 1000);
-            const startTime = endTime - (granularity * count);
+        const cacheKey = `${pair}-${granularity}`;
+        const now = Date.now();
 
-            const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
-                params: { start: startTime, end: endTime, granularity }
-            });
-
-            if (!response.data || !Array.isArray(response.data)) return null;
-
-            // Coinbase returns [time, low, high, open, close, volume]
-            return response.data;
-        } catch (e) {
-            return null;
+        // 1. CHECK CACHE (TTL: 60 seconds)
+        // We use 60s because even for 5m candles, we don't need sub-minute updates for trend/volume mostly
+        if (this.candleCache.has(cacheKey)) {
+            const cached = this.candleCache.get(cacheKey)!;
+            if (now - cached.timestamp < 60000) {
+                return cached.data;
+            }
         }
+
+        // 2. FETCH WITH RETRY (Handle 429 Rate Limits)
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (attempts < maxAttempts) {
+            try {
+                const endTime = Math.floor(Date.now() / 1000);
+                const startTime = endTime - (granularity * count);
+
+                const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
+                    params: { start: startTime, end: endTime, granularity },
+                    timeout: 5000 // 5s timeout
+                });
+
+                if (!response.data || !Array.isArray(response.data)) return null;
+
+                // Success! Update Cache
+                this.candleCache.set(cacheKey, { timestamp: now, data: response.data });
+
+                return response.data;
+            } catch (e: any) {
+                attempts++;
+                const isRateLimit = e.response && e.response.status === 429;
+
+                if (isRateLimit || attempts === maxAttempts) {
+                    console.warn(`⚠️ [COINBASE API] Fetch failed for ${pair} (Attempt ${attempts}/${maxAttempts}): ${e.message}`);
+                    if (isRateLimit && attempts < maxAttempts) {
+                        const delay = 1000 * attempts; // 1s, 2s...
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue; // Retry
+                    }
+                }
+                if (attempts === maxAttempts) return null;
+            }
+        }
+        return null;
     }
 
     private calculateSMA(prices: number[], period: number): number {
@@ -1672,7 +1708,7 @@ function connectWs() {
             "product_ids": TARGET_PAIRS
         };
         ws.send(JSON.stringify(subscribeMsg));
-        console.log(`🟢 Oracle V23.4 (Hybrid Whale) Started for: ${TARGET_PAIRS.join(', ')}`);
+        console.log(`🟢 Oracle V23.4.1 (API Fix) Started for: ${TARGET_PAIRS.join(', ')}`);
     });
 
     ws.on('message', (data: any) => {
