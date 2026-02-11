@@ -194,6 +194,33 @@ class PriceMonitor {
             threshold = Math.max(0.5, threshold - 0.3);
         }
 
+        // Debug Log for 0.4% moves (Whale Watch)
+        if (absChange >= 0.4) {
+            console.log(`🔎 SCAN: ${pair} moved ${change.toFixed(2)}%, checking triggers...`);
+        }
+
+        // V23.4 HYBRID WHALE TRIGGER (>0.45% + Volume Spike)
+        if (absChange >= 0.45 && absChange < threshold) {
+            // Fetch 5m candle (Current) and 1h candles (24h History)
+            const candles5m = await this.fetchCandles(pair, 300, 2);
+            const candles1h = await this.fetchCandles(pair, 3600, 24);
+
+            if (candles5m && candles1h && candles5m.length > 0 && candles1h.length > 0) {
+                // Coinbase Candle Index 5 is Volume
+                const currentVol = candles5m[0][5];
+                const totalVol24h = candles1h.reduce((sum: number, c: any) => sum + c[5], 0);
+                const avg5mVol = totalVol24h / (24 * 12); // 24h * 12 (5m chunks)
+
+                if (currentVol > 2.5 * avg5mVol) {
+                    const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
+                    console.log(`🐳 [WHALE ALERT] ${pair} Volume Spike: ${Math.round(currentVol)} > 2.5x Avg (${Math.round(avg5mVol)}) | Move: ${change.toFixed(2)}%`);
+                    // Trigger Trade with specific label if needed, or standard sim trade
+                    this.triggerSimTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
+                    return;
+                }
+            }
+        }
+
         if (absChange >= threshold) {
             const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
             console.log(`🚀 [ORACLE TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
@@ -234,16 +261,26 @@ class PriceMonitor {
 
         // SL Distance (1.5x ATR)
         const slDist = atr * 1.5;
-        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
-        const tpPrice = side === 'BUY' ? price + (atr * 3) : price - (atr * 3);
 
         // Position Sizing ($10 Risk)
-        // Risk = |Entry - SL| * Contracts
         // Contracts = $10 / |Entry - SL|
         const riskPerTrade = 10;
         const contracts = Math.floor(riskPerTrade / slDist);
 
         if (contracts <= 0) return;
+
+        // TP Distance (Min $20 Profit Logic)
+        let tpDist = atr * 3;
+        const minProfit = 20;
+        const minTpDist = contracts > 0 ? (minProfit / contracts) : 0;
+
+        if (tpDist < minTpDist) {
+            // console.log(`⚠️ [TP ADJUST] Widen TP to guarantee $${minProfit} profit (Target: ${minTpDist.toFixed(2)})`);
+            tpDist = minTpDist;
+        }
+
+        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
+        const tpPrice = side === 'BUY' ? price + tpDist : price - tpDist;
 
 
         // Leverage Calc (Based on Sim Balance $1400 as requested)
@@ -294,11 +331,14 @@ class PriceMonitor {
     private async getTrendData(pair: string): Promise<{ sma200_1h: number, sma200_4h: number, currentPrice: number } | null> {
         try {
             // Fetch 1h candles (last 200 hours = ~8 days)
-            const candles1h = await this.fetchCandles(pair, 3600, 200);
+            const candles1hFull = await this.fetchCandles(pair, 3600, 200);
             // Fetch 4h candles (last 800 hours = ~33 days)
-            const candles4h = await this.fetchCandles(pair, 14400, 200);
+            const candles4hFull = await this.fetchCandles(pair, 14400, 200);
 
-            if (!candles1h || !candles4h) return null;
+            if (!candles1hFull || !candles4hFull) return null;
+
+            const candles1h = candles1hFull.map((c: any) => c[4]);
+            const candles4h = candles4hFull.map((c: any) => c[4]);
 
             const sma200_1h = this.calculateSMA(candles1h, 200);
             const sma200_4h = this.calculateSMA(candles4h, 200);
@@ -311,24 +351,19 @@ class PriceMonitor {
         }
     }
 
-    private async fetchCandles(pair: string, granularity: number, count: number): Promise<number[] | null> {
+    private async fetchCandles(pair: string, granularity: number, count: number): Promise<any[] | null> {
         try {
             const endTime = Math.floor(Date.now() / 1000);
             const startTime = endTime - (granularity * count);
 
             const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
-                params: {
-                    start: startTime,
-                    end: endTime,
-                    granularity
-                }
+                params: { start: startTime, end: endTime, granularity }
             });
 
             if (!response.data || !Array.isArray(response.data)) return null;
 
             // Coinbase returns [time, low, high, open, close, volume]
-            // We need close prices (index 4)
-            return response.data.map((candle: any) => candle[4]);
+            return response.data;
         } catch (e) {
             return null;
         }
@@ -390,7 +425,11 @@ class PriceMonitor {
         const absChange = Math.abs(change);
         const velocityStatus = absChange >= threshold ? "⚡ IMPULSE" : "📊 Normal";
 
-        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | ${timeElapsed}s | ${sign}${change.toFixed(2)}% ${direction} | ${velocityStatus}`);
+        const minutes = Math.floor(timeElapsed / 60);
+        const seconds = timeElapsed % 60;
+        const timeStr = `${minutes}m ${seconds.toFixed(0)}s`;
+
+        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | ${sign}${change.toFixed(2)}% ${direction} (${timeStr}) | ${velocityStatus}`);
     }
 
 }
@@ -1198,7 +1237,6 @@ function startServer() {
                         atr: parseFloat(atr.toFixed(2)),
                         actual_risk: parseFloat(actualRisk.toFixed(2)),
                         margin_used: parseFloat(marginRequired.toFixed(2)),
-                        message: messageReport
                         leverage: leverage,
                         mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE',
                         sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
@@ -1634,7 +1672,7 @@ function connectWs() {
             "product_ids": TARGET_PAIRS
         };
         ws.send(JSON.stringify(subscribeMsg));
-        console.log(`[SUBSCRIBE] Sent subscription for: ${TARGET_PAIRS.join(', ')}`);
+        console.log(`🟢 Oracle V23.4 (Hybrid Whale) Started for: ${TARGET_PAIRS.join(', ')}`);
     });
 
     ws.on('message', (data: any) => {
