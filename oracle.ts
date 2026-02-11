@@ -1238,7 +1238,7 @@ function startServer() {
                     const slPnl = Math.abs(parseFloat(slPrice.toFixed(2)) - filledPrice) * contracts;
                     const emoji = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
 
-                    const messageReport = `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nMargin: $${(notional / 10).toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`;
+                    const messageReport = `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nEntry: $${filledPrice.toFixed(2)}\nMargin: $${marginRequired.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`;
 
                     // OPTIONAL: Send direct report if requested (for Testing or Bypass)
                     if (data.report_to_telegram) {
