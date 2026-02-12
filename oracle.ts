@@ -236,6 +236,29 @@ class PriceMonitor {
 
         if (now - last < COOLDOWN_MS) return;
 
+        // --- RSI SAFETY GUARD (V24) ---
+        // Block extreme signals to prevent selling at bottom / buying at top
+        const candles = await this.fetchCandles(pair, 3600, 50);
+        if (candles && candles.length >= 14) {
+            const candlesParsed = candles.map(c => ({
+                close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c.close || 0),
+                high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c.high || 0),
+                low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c.low || 0)
+            }));
+
+            const rsi = this.calculateRSI(candlesParsed, 14);
+
+            if (side === 'SELL' && rsi < 25) {
+                console.log(`🛡️ [RSI GUARD] ${pair} SELL BLOCKED: RSI=${rsi.toFixed(1)} (Oversold - High Reversal Risk)`);
+                return;
+            }
+
+            if (side === 'BUY' && rsi > 75) {
+                console.log(`🛡️ [RSI GUARD] ${pair} BUY BLOCKED: RSI=${rsi.toFixed(1)} (Overbought - High Dump Risk)`);
+                return;
+            }
+        }
+
         // CHECK FILTERS
         // 1. Trend Filter (Only Block Longs in Downtrend)
         const trendData = await this.getTrendData(pair);
@@ -410,6 +433,23 @@ class PriceMonitor {
         const slice = prices.slice(-period);
         const sum = slice.reduce((a, b) => a + b, 0);
         return sum / period;
+    }
+
+    private calculateRSI(candles: { close: number }[], period: number): number {
+        if (candles.length < period + 1) return 50; // Default neutral RSI
+
+        let gains = 0, losses = 0;
+        for (let i = 0; i < period; i++) {
+            const diff = candles[i].close - candles[i + 1].close;
+            if (diff > 0) gains += diff;
+            else losses -= diff;
+        }
+
+        if (losses === 0) return 100;
+        const avgGain = gains / period;
+        const avgLoss = losses / period;
+        const rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
     }
 
     private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number } | null): string | null {
@@ -1380,14 +1420,20 @@ function startServer() {
             return;
         }
 
-        // 9. NEWS RSS PROXY
+        // 9. NEWS RSS PROXY (V24 - COIN-SPECIFIC)
         if (parsedUrl.pathname === '/news') {
-            console.log(`[PROXY] Fetching CoinTelegraph RSS...`);
             try {
-                const response = await axios.get('https://cointelegraph.com/rss', { timeout: 5000 });
+                const queryParam = parsedUrl.query?.query || 'cryptocurrency';
+                const query = Array.isArray(queryParam) ? queryParam[0] : queryParam;
+                console.log(`[PROXY] Fetching news for: ${query}...`);
+
+                // Use CoinTelegraph RSS with coin-specific filter
+                const RSS_URL = `https://cointelegraph.com/rss/tag/${query.toLowerCase()}`;
+
+                const response = await axios.get(RSS_URL, { timeout: 5000 });
                 res.writeHead(200, { 'Content-Type': 'application/xml' }); // Return XML for RSS
                 res.end(response.data);
-                console.log(`[SUCCESS] Served RSS Feed`);
+                console.log(`[SUCCESS] Served RSS Feed for ${query}`);
             } catch (error: any) {
                 console.error(`[ERROR] RSS Fetch failed:`, error.message);
                 res.writeHead(502);

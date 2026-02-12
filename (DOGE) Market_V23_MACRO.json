@@ -92,7 +92,7 @@
     },
     {
       "parameters": {
-        "url": "http://172.17.0.1:3001/news",
+        "url": "=http://172.17.0.1:3001/news?query={{ $('Current_Price').first().json.pair.split('-')[0] }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
