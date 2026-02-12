@@ -1329,21 +1329,8 @@ function startServer() {
             return;
         }
 
-        // 9. NEWS RSS PROXY
-        if (parsedUrl.pathname === '/news') {
-            console.log(`[PROXY] Fetching CoinTelegraph RSS...`);
-            try {
-                const response = await axios.get('https://cointelegraph.com/rss', { timeout: 5000 });
-                res.writeHead(200, { 'Content-Type': 'application/xml' }); // Return XML for RSS
-                res.end(response.data);
-                console.log(`[SUCCESS] Served RSS Feed`);
-            } catch (error: any) {
-                console.error(`[ERROR] RSS Fetch failed:`, error.message);
-                res.writeHead(502);
-                res.end(JSON.stringify({ error: 'RSS Proxy Error', details: error.message }));
-            }
-            return;
-        }
+        // 9. NEWS RSS PROXY (REMOVED - Superseded by V27.2 Filtered Proxy below)
+
 
         // 10. MACRO CALENDAR (KEYLESS - FOREXFACTORY)
         if (req.method === 'GET' && parsedUrl.pathname === '/macro') {
