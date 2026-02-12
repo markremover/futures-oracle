@@ -982,12 +982,16 @@ function startServer() {
             req.on('data', chunk => body += chunk);
             req.on('end', async () => {
                 try {
+                    console.log(`[EXECUTE REQUEST] Raw body length: ${body.length}`); // DEBUG
                     const data = JSON.parse(body);
+                    console.log(`[EXECUTE REQUEST] Payload:`, JSON.stringify(data)); // DEBUG
+
                     const { pair, signal, confidence } = data;
 
                     if (!pair || !signal) {
+                        console.error('[EXECUTE ERROR] Missing required fields:', { pair, signal });
                         res.writeHead(400, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ error: 'Missing required fields: pair, signal' }));
+                        res.end(JSON.stringify({ error: 'Missing required fields: pair, signal', received: data }));
                         return;
                     }
 
