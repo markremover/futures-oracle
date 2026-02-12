@@ -1380,6 +1380,70 @@ function startServer() {
             return;
         }
 
+        // 5.5. NEWS RSS PROXY (V27 - COIN-SPECIFIC FILTERING)
+        if (parsedUrl.pathname === '/news') {
+            try {
+                const queryParam = parsedUrl.query?.query || 'cryptocurrency';
+                const query = Array.isArray(queryParam) ? queryParam[0] : queryParam;
+                const coinName = query.toUpperCase().replace('-USD', '').replace('-PERP', '');
+                console.log(`[NEWS PROXY] Fetching and filtering news for: ${coinName}...`);
+
+                // Map coin symbols to search terms (including common names)
+                const coinSynonyms: { [key: string]: string[] } = {
+                    'ETH': ['ETH', 'ETHEREUM', 'ETHER'],
+                    'BTC': ['BTC', 'BITCOIN'],
+                    'SOL': ['SOL', 'SOLANA'],
+                    'XRP': ['XRP', 'RIPPLE'],
+                    'DOGE': ['DOGE', 'DOGECOIN'],
+                    'SUI': ['SUI'],
+                    'ADA': ['ADA', 'CARDANO'],
+                    'MATIC': ['MATIC', 'POLYGON'],
+                    'AVAX': ['AVAX', 'AVALANCHE']
+                };
+
+                const searchTerms = coinSynonyms[coinName] || [coinName];
+
+                // Fetch generic RSS from CoinTelegraph
+                const RSS_URL = 'https://cointelegraph.com/rss';
+                const response = await axios.get(RSS_URL, { timeout: 5000 });
+
+                // Parse and filter RSS items by coin name
+                const rssData = response.data;
+                const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
+
+                const filteredItems = itemMatches.filter((item: string) => {
+                    const title = item.match(/<title>(.*?)<\/title>/)?.[1] || '';
+                    const description = item.match(/<description>(.*?)<\/description>/)?.[1] || '';
+                    const combined = (title + ' ' + description).toUpperCase();
+
+                    // Match any search term
+                    return searchTerms.some(term => combined.includes(term));
+                });
+
+                // Limit to top 5 relevant items
+                const limitedItems = filteredItems.slice(0, 5);
+
+                // If no items found, return empty but valid RSS
+                if (limitedItems.length === 0) {
+                    console.log(`[WARNING] No news items found for ${coinName}, returning empty feed`);
+                }
+
+                // Rebuild filtered RSS feed
+                const rssHeader = rssData.substring(0, rssData.indexOf('<item>') !== -1 ? rssData.indexOf('<item>') : rssData.indexOf('</channel>'));
+                const rssFooter = '</channel>\n</rss>\n';
+                const filteredRSS = rssHeader + limitedItems.join('') + rssFooter;
+
+                res.writeHead(200, { 'Content-Type': 'application/xml' });
+                res.end(filteredRSS);
+                console.log(`[SUCCESS] Served ${limitedItems.length} filtered RSS items for ${coinName}`);
+            } catch (error: any) {
+                console.error(`[ERROR] RSS Fetch/Filter failed:`, error.message);
+                res.writeHead(502);
+                res.end(JSON.stringify({ error: 'RSS Proxy Error', details: error.message }));
+            }
+            return;
+        }
+
         // 6. MARKET CONTEXT (STOCKS & MACRO) - FINNHUB (V19)
         if (parsedUrl.pathname === '/market-context') {
             try {
