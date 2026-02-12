@@ -146,7 +146,7 @@ class PriceMonitor {
                 // Log Result
                 console.log(`🏁 [GHOST RESULT] ${pair} ${result} | ${sign}$${netPnl.toFixed(2)} | Duration: ${durationStr}`);
 
-                // Send Webhook with NEW FORMAT
+                // Send Webhook
                 const symbol = pair.split('-')[0].toLowerCase();
                 const url = `${N8N_WEBHOOK_BASE}${symbol}`;
 
@@ -160,8 +160,7 @@ class PriceMonitor {
                         pnl: netPnl.toFixed(2),
                         result,
                         duration: durationStr,
-                        // NEW REPORT FORMAT
-                        message: `🏁 [GHOST RESULT] ${pair}\nStatus: ${result === 'WIN' ? 'PROFIT 💰' : 'LOSS 💀'}\nOutcome: ${sign}$${netPnl.toFixed(2)}\nExit Price: $${currentPrice}\nDuration: ${durationStr}`
+                        message: `🏁 [GHOST RESULT] ${pair}\nStatus: ${result} ${emoji}\nOutcome: ${sign}$${netPnl.toFixed(2)} (Net)\nEntry: $${pos.entryPrice}\nExit: $${currentPrice}\nLeverage: x${(pos.entryPrice * pos.contracts / 1400).toFixed(1)}\nDuration: ${durationStr}\nFees: -$${fees.toFixed(2)}`
                     });
                 } catch (e) {
                     // ignore webhook error
@@ -194,36 +193,9 @@ class PriceMonitor {
             threshold = Math.max(0.5, threshold - 0.3);
         }
 
-        // Debug Log for 0.4% moves (Whale Watch)
-        if (absChange >= 0.4) {
-            console.log(`🔎 SCAN: ${pair} moved ${change.toFixed(2)}%, checking triggers...`);
-        }
-
-        // V23.4 HYBRID WHALE TRIGGER (>0.45% + Volume Spike)
-        if (absChange >= 0.45 && absChange < threshold) {
-            // Fetch 5m candle (Current) and 1h candles (24h History)
-            const candles5m = await this.fetchCandles(pair, 300, 2);
-            const candles1h = await this.fetchCandles(pair, 3600, 24);
-
-            if (candles5m && candles1h && candles5m.length > 0 && candles1h.length > 0) {
-                // Coinbase Candle Index 5 is Volume
-                const currentVol = candles5m[0][5];
-                const totalVol24h = candles1h.reduce((sum: number, c: any) => sum + c[5], 0);
-                const avg5mVol = totalVol24h / (24 * 12); // 24h * 12 (5m chunks)
-
-                if (currentVol > 2.5 * avg5mVol) {
-                    const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
-                    console.log(`🐳 [WHALE ALERT] ${pair} Volume Spike: ${Math.round(currentVol)} > 2.5x Avg (${Math.round(avg5mVol)}) | Move: ${change.toFixed(2)}%`);
-                    // Trigger Trade with specific label if needed, or standard sim trade
-                    this.triggerSimTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
-                    return;
-                }
-            }
-        }
-
         if (absChange >= threshold) {
             const direction = change > 0 ? "LONG 🟢" : "SHORT 🔴";
-            console.log(`🚀 [ORACLE TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
+            // console.log(`🚀 [ORACLE TRIGGER] ${pair}: ${change.toFixed(2)}% in 5m (${direction}) | Threshold: ${threshold.toFixed(1)}%`);
 
             this.triggerSimTrade(pair, change > 0 ? 'BUY' : 'SELL', currentPrice, change);
         }
@@ -235,29 +207,6 @@ class PriceMonitor {
         const COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
 
         if (now - last < COOLDOWN_MS) return;
-
-        // --- RSI SAFETY GUARD (V24) ---
-        // Block extreme signals to prevent selling at bottom / buying at top
-        const candles = await this.fetchCandles(pair, 3600, 50);
-        if (candles && candles.length >= 14) {
-            const candlesParsed = candles.map(c => ({
-                close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c.close || 0),
-                high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c.high || 0),
-                low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c.low || 0)
-            }));
-
-            const rsi = this.calculateRSI(candlesParsed, 14);
-
-            if (side === 'SELL' && rsi < 25) {
-                console.log(`🛡️ [RSI GUARD] ${pair} SELL BLOCKED: RSI=${rsi.toFixed(1)} (Oversold - High Reversal Risk)`);
-                return;
-            }
-
-            if (side === 'BUY' && rsi > 75) {
-                console.log(`🛡️ [RSI GUARD] ${pair} BUY BLOCKED: RSI=${rsi.toFixed(1)} (Overbought - High Dump Risk)`);
-                return;
-            }
-        }
 
         // CHECK FILTERS
         // 1. Trend Filter (Only Block Longs in Downtrend)
@@ -284,31 +233,21 @@ class PriceMonitor {
 
         // SL Distance (1.5x ATR)
         const slDist = atr * 1.5;
+        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
+        const tpPrice = side === 'BUY' ? price + (atr * 3) : price - (atr * 3);
 
         // Position Sizing ($10 Risk)
+        // Risk = |Entry - SL| * Contracts
         // Contracts = $10 / |Entry - SL|
         const riskPerTrade = 10;
         const contracts = Math.floor(riskPerTrade / slDist);
 
         if (contracts <= 0) return;
 
-        // TP Distance (Min $20 Profit Logic)
-        let tpDist = atr * 3;
-        const minProfit = 20;
-        const minTpDist = contracts > 0 ? (minProfit / contracts) : 0;
 
-        if (tpDist < minTpDist) {
-            // console.log(`⚠️ [TP ADJUST] Widen TP to guarantee $${minProfit} profit (Target: ${minTpDist.toFixed(2)})`);
-            tpDist = minTpDist;
-        }
-
-        const slPrice = side === 'BUY' ? price - slDist : price + slDist;
-        const tpPrice = side === 'BUY' ? price + tpDist : price - tpDist;
-
-
-        // Leverage Calc (Based on Sim Balance $1400 as requested)
+        // Leverage Calc
         const notional = contracts * price;
-        const leverage = notional / SIM_BALANCE;
+        const leverage = notional / SIM_BALANCE; // Based on $1400
 
         // Add to Memory
         const orderId = `SIM-${now}`;
@@ -320,14 +259,14 @@ class PriceMonitor {
         // Calc Projected PnL for Report
         const tpPnl = Math.abs(tpPrice - price) * contracts;
         const slPnl = Math.abs(slPrice - price) * contracts;
-        // Margin for display: 10x assumed
-        const margin = notional / 10;
+        const margin = notional / 10; // Mock 10x margin usage
 
-        const emoji = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
+        const emoji = side === 'BUY' ? '🟢' : '🔴';
+        const failEmoji = side === 'BUY' ? '📉' : '📈';
 
         console.log(`🚀 [ORDER SENT] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)}) | TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`);
 
-        // --- V23 REPORTING: OPEN ---
+        // --- V22 REPORTING: OPEN ---
         const symbol = pair.split('-')[0].toLowerCase();
         const url = `${N8N_WEBHOOK_BASE}${symbol}`;
 
@@ -343,8 +282,7 @@ class PriceMonitor {
                 sl_price: slPrice,
                 risk: riskPerTrade,
                 timestamp: now,
-                // NEW REPORT FORMAT
-                message: `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`
+                message: `🚀 [ORDER SENT] ${pair}\nType: ${side} ${emoji}\nEntry: $${price}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(2)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(2)})`
             });
         } catch (e: any) {
             console.error(`❌ [WEBHOOK FAILED]`, e.message);
@@ -354,14 +292,11 @@ class PriceMonitor {
     private async getTrendData(pair: string): Promise<{ sma200_1h: number, sma200_4h: number, currentPrice: number } | null> {
         try {
             // Fetch 1h candles (last 200 hours = ~8 days)
-            const candles1hFull = await this.fetchCandles(pair, 3600, 200);
+            const candles1h = await this.fetchCandles(pair, 3600, 200);
             // Fetch 4h candles (last 800 hours = ~33 days)
-            const candles4hFull = await this.fetchCandles(pair, 14400, 200);
+            const candles4h = await this.fetchCandles(pair, 14400, 200);
 
-            if (!candles1hFull || !candles4hFull) return null;
-
-            const candles1h = candles1hFull.map((c: any) => c[4]);
-            const candles4h = candles4hFull.map((c: any) => c[4]);
+            if (!candles1h || !candles4h) return null;
 
             const sma200_1h = this.calculateSMA(candles1h, 200);
             const sma200_4h = this.calculateSMA(candles4h, 200);
@@ -374,58 +309,27 @@ class PriceMonitor {
         }
     }
 
-    // Simple in-memory cache for candles: Key = "pair-granularity", Value = { timestamp, data }
-    private candleCache: Map<string, { timestamp: number, data: any[] }> = new Map();
+    private async fetchCandles(pair: string, granularity: number, count: number): Promise<number[] | null> {
+        try {
+            const endTime = Math.floor(Date.now() / 1000);
+            const startTime = endTime - (granularity * count);
 
-    private async fetchCandles(pair: string, granularity: number, count: number): Promise<any[] | null> {
-        const cacheKey = `${pair}-${granularity}`;
-        const now = Date.now();
-
-        // 1. CHECK CACHE (TTL: 60 seconds)
-        // We use 60s because even for 5m candles, we don't need sub-minute updates for trend/volume mostly
-        if (this.candleCache.has(cacheKey)) {
-            const cached = this.candleCache.get(cacheKey)!;
-            if (now - cached.timestamp < 60000) {
-                return cached.data;
-            }
-        }
-
-        // 2. FETCH WITH RETRY (Handle 429 Rate Limits)
-        let attempts = 0;
-        const maxAttempts = 3;
-
-        while (attempts < maxAttempts) {
-            try {
-                const endTime = Math.floor(Date.now() / 1000);
-                const startTime = endTime - (granularity * count);
-
-                const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
-                    params: { start: startTime, end: endTime, granularity },
-                    timeout: 5000 // 5s timeout
-                });
-
-                if (!response.data || !Array.isArray(response.data)) return null;
-
-                // Success! Update Cache
-                this.candleCache.set(cacheKey, { timestamp: now, data: response.data });
-
-                return response.data;
-            } catch (e: any) {
-                attempts++;
-                const isRateLimit = e.response && e.response.status === 429;
-
-                if (isRateLimit || attempts === maxAttempts) {
-                    console.warn(`⚠️ [COINBASE API] Fetch failed for ${pair} (Attempt ${attempts}/${maxAttempts}): ${e.message}`);
-                    if (isRateLimit && attempts < maxAttempts) {
-                        const delay = 1000 * attempts; // 1s, 2s...
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        continue; // Retry
-                    }
+            const response = await axios.get(`https://api.exchange.coinbase.com/products/${pair}/candles`, {
+                params: {
+                    start: startTime,
+                    end: endTime,
+                    granularity
                 }
-                if (attempts === maxAttempts) return null;
-            }
+            });
+
+            if (!response.data || !Array.isArray(response.data)) return null;
+
+            // Coinbase returns [time, low, high, open, close, volume]
+            // We need close prices (index 4)
+            return response.data.map((candle: any) => candle[4]);
+        } catch (e) {
+            return null;
         }
-        return null;
     }
 
     private calculateSMA(prices: number[], period: number): number {
@@ -433,23 +337,6 @@ class PriceMonitor {
         const slice = prices.slice(-period);
         const sum = slice.reduce((a, b) => a + b, 0);
         return sum / period;
-    }
-
-    private calculateRSI(candles: { close: number }[], period: number): number {
-        if (candles.length < period + 1) return 50; // Default neutral RSI
-
-        let gains = 0, losses = 0;
-        for (let i = 0; i < period; i++) {
-            const diff = candles[i].close - candles[i + 1].close;
-            if (diff > 0) gains += diff;
-            else losses -= diff;
-        }
-
-        if (losses === 0) return 100;
-        const avgGain = gains / period;
-        const avgLoss = losses / period;
-        const rs = avgGain / avgLoss;
-        return 100 - (100 / (1 + rs));
     }
 
     private shouldBlockSignal(pair: string, trendData: { sma200_1h: number, sma200_4h: number, currentPrice: number } | null): string | null {
@@ -501,11 +388,7 @@ class PriceMonitor {
         const absChange = Math.abs(change);
         const velocityStatus = absChange >= threshold ? "⚡ IMPULSE" : "📊 Normal";
 
-        const minutes = Math.floor(timeElapsed / 60);
-        const seconds = timeElapsed % 60;
-        const timeStr = `${minutes}m ${seconds.toFixed(0)}s`;
-
-        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | ${sign}${change.toFixed(2)}% ${direction} (${timeStr}) | ${velocityStatus}`);
+        console.log(`   ${pair.padEnd(9)} $${currentPrice.toFixed(2).padEnd(8)} | ${timeElapsed}s | ${sign}${change.toFixed(2)}% ${direction} | ${velocityStatus}`);
     }
 
 }
@@ -847,6 +730,59 @@ function removePosition(orderId: string, hitSl: boolean = false) {
 }
 
 // --- GHOST SNIPER: VIRTUAL POSITION MONITOR ---
+
+// --- ORACLE FUTURES: ACTIVE SIMULATION MONITOR (V22) ---
+
+function monitorVirtualPositions() {
+    if (!SIMULATION_MODE || virtualPositions.length === 0) return;
+
+    virtualPositions.forEach(async (pos, index) => {
+        const currentPrice = prices.get(pos.pair);
+        if (!currentPrice) return;
+
+        const priceDiff = pos.side === 'BUY' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
+        pos.unrealizedPnl = priceDiff * pos.contracts;
+
+        const slHit = pos.side === 'BUY' ? currentPrice <= (pos.slPrice || 0) : currentPrice >= (pos.slPrice || 0);
+        const tpHit = pos.side === 'BUY' ? currentPrice >= (pos.tpPrice || 999999) : currentPrice <= (pos.tpPrice || 0);
+
+        if (slHit || tpHit) {
+            const isWin = tpHit;
+            const pnl = isWin
+                ? ((pos.tpPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1)
+                : ((pos.slPrice || 0) - pos.entryPrice) * pos.contracts * (pos.side === 'BUY' ? 1 : -1);
+
+            simBalance += pnl;
+            totalVirtualPnl += pnl;
+
+            const resultEmoji = isWin ? "✅ WIN" : "❌ LOSS";
+            console.log(`🎯 [ORACLE RESULT] ${pos.pair} ${resultEmoji} | PnL: $${pnl.toFixed(2)} | Balance: $${simBalance.toFixed(2)}`);
+
+            // REMOVE FROM LIST
+            virtualPositions.splice(index, 1);
+            updateTradeResult(pos.pair, isWin ? 'WIN' : 'LOSS', pnl);
+            slCooldowns.set(pos.pair, Date.now());
+
+            // --- V22 REPORTING: FINAL RESULT ---
+            const symbol = pos.pair.split('-')[0].toLowerCase();
+            const url = `${N8N_WEBHOOK_BASE}${symbol}`;
+            try {
+                await axios.post(url, {
+                    type: 'ORACLE_CLOSE',
+                    pair: pos.pair,
+                    result: isWin ? 'TP_HIT' : 'SL_HIT',
+                    pnl: pnl.toFixed(2),
+                    exit_price: currentPrice,
+                    balance: simBalance.toFixed(2),
+                    message: `🎯 [ORACLE RESULT] ${pos.pair} ${resultEmoji}\nStatus: ${isWin ? 'TP HIT' : 'SL HIT'}\nProfit/Loss: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}\nFinal Price: $${currentPrice}`
+                });
+            } catch (e: any) {
+                console.error(`❌ [WEBHOOK FAILED]`, e.message);
+            }
+        }
+    });
+}
+setInterval(monitorVirtualPositions, 2000); // Check every 2s
 
 
 // --- SERVER ---
@@ -1272,35 +1208,6 @@ function startServer() {
 
                     // === SUCCESS RESPONSE ===
                     res.writeHead(200, { 'Content-Type': 'application/json' });
-
-                    // PnL for Report
-                    const tpPnl = Math.abs(parseFloat(tpPrice.toFixed(2)) - filledPrice) * contracts;
-                    const slPnl = Math.abs(parseFloat(slPrice.toFixed(2)) - filledPrice) * contracts;
-                    const emoji = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
-
-                    const messageReport = `🚀 ORDER SENT\n\n${emoji}\nPair: ${pair}\nEntry: $${filledPrice.toFixed(2)}\nMargin: $${marginRequired.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`;
-
-                    // OPTIONAL: Send direct report if requested (for Testing or Bypass)
-                    if (data.report_to_telegram) {
-                        const symbol = pair.split('-')[0].toLowerCase();
-                        const url = `${N8N_WEBHOOK_BASE}${symbol}`;
-                        // Async fire-and-forget
-                        axios.post(url, {
-                            type: 'ORACLE_OPEN',
-                            pair,
-                            side,
-                            entry_price: filledPrice,
-                            leverage: leverage.toFixed(1),
-                            margin: (notional / 10).toFixed(2),
-                            tp_price: tpPrice,
-                            sl_price: slPrice,
-                            risk: actualRisk,
-                            timestamp: Date.now(),
-                            message: messageReport
-                        }).catch(e => console.error(`❌ [DIRECT REPORT FAILED]`, e.message));
-                        console.log(`📤 [DIRECT REPORT] Sent to ${url}`);
-                    }
-
                     res.end(JSON.stringify({
                         success: true,
                         order_id: orderId,
@@ -1314,10 +1221,8 @@ function startServer() {
                         actual_risk: parseFloat(actualRisk.toFixed(2)),
                         margin_used: parseFloat(marginRequired.toFixed(2)),
                         leverage: leverage,
-                        mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE',
-                        sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined,
-                        // NEW REPORT FORMAT
-                        message: messageReport
+                        mode: SIMULATION_MODE ? 'SIMULATION' : 'LIVE', // Ghost Sniper indicator
+                        sim_balance: SIMULATION_MODE ? simBalance.toFixed(2) : undefined
                     }));
 
                     const modeTag = SIMULATION_MODE ? '🎮 [SIM]' : '💵 [LIVE]';
@@ -1420,46 +1325,16 @@ function startServer() {
             return;
         }
 
-        // 9. NEWS RSS PROXY (V25.2 - SERVER-SIDE FILTERING)
+        // 9. NEWS RSS PROXY
         if (parsedUrl.pathname === '/news') {
+            console.log(`[PROXY] Fetching CoinTelegraph RSS...`);
             try {
-                const queryParam = parsedUrl.query?.query || 'cryptocurrency';
-                const query = Array.isArray(queryParam) ? queryParam[0] : queryParam;
-                const coinName = query.toUpperCase();
-                console.log(`[PROXY] Fetching and filtering news for: ${coinName}...`);
-
-                // Fetch generic RSS from CoinTelegraph
-                const RSS_URL = 'https://cointelegraph.com/rss';
-                const response = await axios.get(RSS_URL, { timeout: 5000 });
-
-                // Parse and filter RSS items by coin name
-                const rssData = response.data;
-                const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
-
-                const filteredItems = itemMatches.filter((item: string) => {
-                    const title = item.match(/<title>(.*?)<\/title>/)?.[1] || '';
-                    const description = item.match(/<description>(.*?)<\/description>/)?.[1] || '';
-                    const combined = (title + ' ' + description).toUpperCase();
-
-                    // Match coin name or common variations
-                    return combined.includes(coinName) ||
-                        combined.includes(coinName.replace('-USD', '')) ||
-                        combined.includes(coinName.replace('-PERP', ''));
-                });
-
-                // Limit to top 5 relevant items
-                const limitedItems = filteredItems.slice(0, 5);
-
-                // Rebuild filtered RSS feed
-                const rssHeader = rssData.substring(0, rssData.indexOf('<item>'));
-                const rssFooter = rssData.substring(rssData.lastIndexOf('</item>') + 7);
-                const filteredRSS = rssHeader + limitedItems.join('') + rssFooter;
-
-                res.writeHead(200, { 'Content-Type': 'application/xml' });
-                res.end(filteredRSS);
-                console.log(`[SUCCESS] Served ${limitedItems.length} filtered RSS items for ${coinName}`);
+                const response = await axios.get('https://cointelegraph.com/rss', { timeout: 5000 });
+                res.writeHead(200, { 'Content-Type': 'application/xml' }); // Return XML for RSS
+                res.end(response.data);
+                console.log(`[SUCCESS] Served RSS Feed`);
             } catch (error: any) {
-                console.error(`[ERROR] RSS Fetch/Filter failed:`, error.message);
+                console.error(`[ERROR] RSS Fetch failed:`, error.message);
                 res.writeHead(502);
                 res.end(JSON.stringify({ error: 'RSS Proxy Error', details: error.message }));
             }
@@ -1778,7 +1653,7 @@ function connectWs() {
             "product_ids": TARGET_PAIRS
         };
         ws.send(JSON.stringify(subscribeMsg));
-        console.log(`🟢 Oracle V23.4.1 (API Fix) Started for: ${TARGET_PAIRS.join(', ')}`);
+        console.log(`[SUBSCRIBE] Sent subscription for: ${TARGET_PAIRS.join(', ')}`);
     });
 
     ws.on('message', (data: any) => {
