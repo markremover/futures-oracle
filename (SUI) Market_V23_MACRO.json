@@ -17,7 +17,7 @@
             },
             {
               "name": "pair",
-              "value": "={{ $('Webhook').first().json.pair }}"
+              "value": "SUI-PERP"
             }
           ]
         },
@@ -40,7 +40,7 @@
           "parameters": [
             {
               "name": "pair",
-              "value": "={{ $('Webhook').first().json.pair }}"
+              "value": "SUI-PERP"
             }
           ]
         },
