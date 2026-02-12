@@ -1420,22 +1420,46 @@ function startServer() {
             return;
         }
 
-        // 9. NEWS RSS PROXY (V24 - COIN-SPECIFIC)
+        // 9. NEWS RSS PROXY (V25.2 - SERVER-SIDE FILTERING)
         if (parsedUrl.pathname === '/news') {
             try {
                 const queryParam = parsedUrl.query?.query || 'cryptocurrency';
                 const query = Array.isArray(queryParam) ? queryParam[0] : queryParam;
-                console.log(`[PROXY] Fetching news for: ${query}...`);
+                const coinName = query.toUpperCase();
+                console.log(`[PROXY] Fetching and filtering news for: ${coinName}...`);
 
-                // Use CoinTelegraph RSS with coin-specific filter
-                const RSS_URL = `https://cointelegraph.com/rss/tag/${query.toLowerCase()}`;
-
+                // Fetch generic RSS from CoinTelegraph
+                const RSS_URL = 'https://cointelegraph.com/rss';
                 const response = await axios.get(RSS_URL, { timeout: 5000 });
-                res.writeHead(200, { 'Content-Type': 'application/xml' }); // Return XML for RSS
-                res.end(response.data);
-                console.log(`[SUCCESS] Served RSS Feed for ${query}`);
+
+                // Parse and filter RSS items by coin name
+                const rssData = response.data;
+                const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
+
+                const filteredItems = itemMatches.filter((item: string) => {
+                    const title = item.match(/<title>(.*?)<\/title>/)?.[1] || '';
+                    const description = item.match(/<description>(.*?)<\/description>/)?.[1] || '';
+                    const combined = (title + ' ' + description).toUpperCase();
+
+                    // Match coin name or common variations
+                    return combined.includes(coinName) ||
+                        combined.includes(coinName.replace('-USD', '')) ||
+                        combined.includes(coinName.replace('-PERP', ''));
+                });
+
+                // Limit to top 5 relevant items
+                const limitedItems = filteredItems.slice(0, 5);
+
+                // Rebuild filtered RSS feed
+                const rssHeader = rssData.substring(0, rssData.indexOf('<item>'));
+                const rssFooter = rssData.substring(rssData.lastIndexOf('</item>') + 7);
+                const filteredRSS = rssHeader + limitedItems.join('') + rssFooter;
+
+                res.writeHead(200, { 'Content-Type': 'application/xml' });
+                res.end(filteredRSS);
+                console.log(`[SUCCESS] Served ${limitedItems.length} filtered RSS items for ${coinName}`);
             } catch (error: any) {
-                console.error(`[ERROR] RSS Fetch failed:`, error.message);
+                console.error(`[ERROR] RSS Fetch/Filter failed:`, error.message);
                 res.writeHead(502);
                 res.end(JSON.stringify({ error: 'RSS Proxy Error', details: error.message }));
             }
