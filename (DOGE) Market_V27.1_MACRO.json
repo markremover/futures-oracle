@@ -1,5 +1,5 @@
 {
-  "name": "(SUI) Market_V23_MACRO",
+  "name": "(DOGE) Market_V27.1_MACRO",
   "nodes": [
     {
       "parameters": {
@@ -17,7 +17,7 @@
             },
             {
               "name": "pair",
-              "value": "SUI-PERP"
+              "value": "DOGE-PERP"
             }
           ]
         },
@@ -26,10 +26,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        464,
-        400
+        1280,
+        48
       ],
-      "id": "68974fd3-adf5-4eab-bd44-71cc5a1fed05",
+      "id": "5a785cad-3c7b-4cd4-acda-45328b7a64cd",
       "name": "Historical Candles"
     },
     {
@@ -40,7 +40,7 @@
           "parameters": [
             {
               "name": "pair",
-              "value": "SUI-PERP"
+              "value": "DOGE-PERP"
             }
           ]
         },
@@ -51,10 +51,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        624,
-        400
+        1440,
+        48
       ],
-      "id": "97a53ff3-2e17-4193-924d-4654f3c8faab",
+      "id": "0c023a26-4d23-494c-b28e-b790de1e031a",
       "name": "Current_Price",
       "retryOnFail": true,
       "maxTries": 5,
@@ -63,18 +63,18 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "futurec-trigger-sui",
+        "path": "futurec-trigger-doge",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        272,
-        400
+        1072,
+        48
       ],
       "name": "Webhook",
-      "id": "715d39fb-5e0f-4b55-a72e-1f6f9d9314a4",
-      "webhookId": "b8d2399f-eeda-4278-a3b7-2d0eec6b09a7"
+      "id": "c9652b68-1c7a-4d31-8a36-2264bc643334",
+      "webhookId": "a6246edd-90d5-4f60-a5ca-aea27cfb1511"
     },
     {
       "parameters": {
@@ -84,10 +84,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        944,
-        400
+        1760,
+        48
       ],
-      "id": "47c13162-64fa-415c-9ffd-6a678ffc04f2",
+      "id": "f7461c4f-0e72-49d1-bd26-4bc3b794e933",
       "name": "F&G Index"
     },
     {
@@ -98,10 +98,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1136,
-        400
+        1952,
+        48
       ],
-      "id": "1c308426-038b-4b1c-9506-26d9388a9576",
+      "id": "c296ab82-87a4-483c-9d74-5d0d0cd52132",
       "name": "News/Sentiment"
     },
     {
@@ -112,10 +112,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1328,
-        400
+        2144,
+        48
       ],
-      "id": "c8ab034a-335f-46e0-9817-c4b659d1e0b3",
+      "id": "ee05ce63-6b2d-4814-b205-87d5b900bfcc",
       "name": "Macro Calendar"
     },
     {
@@ -163,10 +163,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        496,
-        608
+        1312,
+        256
       ],
-      "id": "36cb96c5-fc11-4fc3-a545-4a4910670c93",
+      "id": "93b03dc0-b528-4a4f-b1f6-ec6908932ce4",
       "name": "Risk Filter"
     },
     {
@@ -176,10 +176,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        784,
-        400
+        1600,
+        48
       ],
-      "id": "033969f6-93df-4c28-92c2-de0370de365e",
+      "id": "15b4dc47-29f3-48b2-ba6c-a96313f55139",
       "name": "Code/Function (ATR/RSI Filter)"
     },
     {
@@ -193,10 +193,10 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1104,
-        592
+        1920,
+        240
       ],
-      "id": "a8f16171-9588-4000-bd20-d55a9b6950e4",
+      "id": "faf1e84f-2401-4624-b2c3-7fcc1ed5b16a",
       "name": "Telegram (Report)",
       "webhookId": "01bcba6c-bcda-4892-998c-e67f2855e89a",
       "credentials": {
@@ -213,10 +213,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        304,
-        608
+        1120,
+        256
       ],
-      "id": "f6d2f770-8806-4c83-9be9-07ec81af4d6c",
+      "id": "0ca54cec-6884-4642-8329-b7a39cdad543",
       "name": "Parser"
     },
     {
@@ -227,10 +227,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1520,
-        400
+        2336,
+        48
       ],
-      "id": "6227e404-aa6f-4219-b81f-6e0ec64309f3",
+      "id": "0021b308-2112-4983-977c-f049533dc33e",
       "name": "Market Context"
     },
     {
@@ -239,16 +239,16 @@
         "url": "http://172.17.0.1:3001/analyze",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyBuJOzQitBHNcKqJnOFRC8z0ky2Ru5BVfM\"\n}",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"source\": \"{{ $('Webhook').first().json.source || 'LIVE' }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"news_xml\": {{ JSON.stringify($('News/Sentiment').first().json.data) }},\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyCWeqnZPpLHVqAmkelMYN0rm6TQOAHtTfw\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        1712,
-        400
+        2528,
+        48
       ],
-      "id": "a1072214-b1a7-4773-9494-a1bef9de5a9d",
+      "id": "d4329182-26ff-4302-836b-b0bc42c27c74",
       "name": "HTTP Request"
     },
     {
@@ -257,16 +257,16 @@
         "url": "http://172.17.0.1:3001/execute-order",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"{{ $('Webhook').first().json.pair }}\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Current_Price').first().json.pair }}\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        704,
-        592
+        1520,
+        240
       ],
-      "id": "execute-order-sui-1769394496458",
+      "id": "execute-order-doge-1769394496457",
       "name": "Execute Order (Oracle API)"
     }
   ],
@@ -410,11 +410,11 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "0a36135e-44bb-4018-b73c-58302b3abe29",
+  "versionId": "5b2e46b4-705e-48f8-b17e-af869683a79a",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "dbc77a83d2b4b81619f9b25f03d3eb04bad62bf94cb1838a3d14a7b99cb0d36c"
   },
-  "id": "gs2x34iDZ5asJwgF",
+  "id": "QhJk6MP2c9IBYgFl",
   "tags": []
 }

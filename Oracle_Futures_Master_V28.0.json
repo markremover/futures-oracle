@@ -1,0 +1,439 @@
+{
+    "name": "Oracle Futures Master V28.0",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "futurec-master",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                1200,
+                300
+            ],
+            "id": "webhook-master-v28",
+            "name": "Webhook"
+        },
+        {
+            "parameters": {
+                "jsCode": "// ORACLE FUTURES V28.0 - CONFIG NODE\n// Extract pair from Webhook\nconst webhookData = $('Webhook').first().json;\nconst rawPair = webhookData.pair || 'ETH-PERP';\nconst source = webhookData.source || 'LIVE';\n\n// Normalize pair\nlet pair = rawPair.toUpperCase();\nif (!pair.endsWith('-PERP') && !pair.endsWith('-USD')) {\n    pair = pair + '-PERP';\n}\n\nconst coinSymbol = pair.split('-')[0];\n\n// Coin-specific configuration\nconst coinConfig = {\n    'ETH': { atr_multiplier_sl: 1.5, atr_multiplier_tp: 3.0, risk_per_trade: 10, volatility_threshold: 0.8, rsi_neutral_min: 48, rsi_neutral_max: 52, confidence_threshold: 74 },\n    'SOL': { atr_multiplier_sl: 1.5, atr_multiplier_tp: 3.0, risk_per_trade: 10, volatility_threshold: 0.8, rsi_neutral_min: 48, rsi_neutral_max: 52, confidence_threshold: 74 },\n    'XRP': { atr_multiplier_sl: 1.5, atr_multiplier_tp: 3.0, risk_per_trade: 10, volatility_threshold: 0.8, rsi_neutral_min: 48, rsi_neutral_max: 52, confidence_threshold: 74 },\n    'DOGE': { atr_multiplier_sl: 1.8, atr_multiplier_tp: 3.5, risk_per_trade: 10, volatility_threshold: 1.2, rsi_neutral_min: 48, rsi_neutral_max: 52, confidence_threshold: 76 },\n    'SUI': { atr_multiplier_sl: 1.8, atr_multiplier_tp: 3.5, risk_per_trade: 10, volatility_threshold: 1.2, rsi_neutral_min: 48, rsi_neutral_max: 52, confidence_threshold: 76 },\n    'BTC': { atr_multiplier_sl: 1.5, atr_multiplier_tp: 3.0, risk_per_trade: 10, volatility_threshold: 0.6, rsi_neutral_min: 48, rsi_neutral_max: 52, confidence_threshold: 72 }\n};\n\nconst config = coinConfig[coinSymbol] || coinConfig['ETH'];\n\nreturn {\n    json: {\n        ...webhookData,\n        pair: pair,\n        coin_symbol: coinSymbol,\n        source: source,\n        ...config,\n        config_version: 'V28.0',\n        timestamp: Date.now()\n    }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1400,
+                300
+            ],
+            "id": "config-node-v28",
+            "name": "Config"
+        },
+        {
+            "parameters": {
+                "url": "=http://172.17.0.1:3001/candles",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "granularity",
+                            "value": "3600"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "300"
+                        },
+                        {
+                            "name": "pair",
+                            "value": "={{ $('Config').first().json.pair }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                1600,
+                300
+            ],
+            "id": "candles-v28",
+            "name": "Historical Candles"
+        },
+        {
+            "parameters": {
+                "url": "=http://172.17.0.1:3001/price",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "pair",
+                            "value": "={{ $('Config').first().json.pair }}"
+                        }
+                    ]
+                },
+                "options": {
+                    "timeout": 60000
+                }
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                1800,
+                300
+            ],
+            "id": "price-v28",
+            "name": "Current_Price",
+            "retryOnFail": true,
+            "maxTries": 5,
+            "waitBetweenTries": 5000
+        },
+        {
+            "parameters": {
+                "jsCode": "// ATR/RSI FILTER - DYNAMIC FROM CONFIG\nconst PERIOD = 14;\nconst config = $('Config').first().json;\nconst ATR_MAX_THRESHOLD = 0.03;\nconst RSI_NEUTRAL_MIN = config.rsi_neutral_min;\nconst RSI_NEUTRAL_MAX = config.rsi_neutral_max;\n\nconst allItems = $items('Historical Candles');\nconst candleData = allItems.map(item => item.json);\n\nlet current_price = 0;\nif (Array.isArray(candleData) && candleData.length > 0) {\n    const lastCandle = candleData[0];\n    if (Array.isArray(lastCandle)) {\n        current_price = parseFloat(lastCandle[4]);\n    } else {\n        current_price = parseFloat(lastCandle['c'] || 0);\n    }\n}\n\nif (current_price === 0) {\n    return [{ json: { signal_blocked: true, reason: \"Error: No price in candles\" } }];\n}\n\nconst candles = candleData.map(c => ({\n    close: Array.isArray(c) ? parseFloat(c[4]) : parseFloat(c['4'] || c.close || 0),\n    high: Array.isArray(c) ? parseFloat(c[2]) : parseFloat(c['2'] || c.high || 0),\n    low: Array.isArray(c) ? parseFloat(c[1]) : parseFloat(c['1'] || c.low || 0)\n}));\n\nfunction calculateATR(data, p) {\n    let sum = 0;\n    for (let i = 0; i < p; i++) {\n        const c = data[i];\n        const prev = data[i+1] ? data[i+1].close : c.close;\n        sum += Math.max(c.high - c.low, Math.abs(c.high - prev), Math.abs(c.low - prev));\n    }\n    return sum / p;\n}\n\nfunction calculateRSI(data, p) {\n    let g = 0, l = 0;\n    for (let i = 0; i < p; i++) {\n        const diff = data[i].close - data[i+1].close;\n        if (diff > 0) g += diff; else l -= diff;\n    }\n    if (l === 0) return 100;\n    return 100 - (100 / (1 + ((g/p) / (l/p))));\n}\n\nconst atr_v = calculateATR(candles, PERIOD);\nconst rsi_v = calculateRSI(candles, PERIOD);\nconst atr_p = (atr_v / current_price);\n\nlet blocked = false;\nlet msg = \"OK\";\n\nif (atr_p > ATR_MAX_THRESHOLD) {\n    blocked = true;\n    msg = \"High Volatility\";\n}\nif (rsi_v >= RSI_NEUTRAL_MIN && rsi_v <= RSI_NEUTRAL_MAX) {\n    blocked = true;\n    msg += \" | RSI Neutral\";\n}\n\nreturn [{ json: {\n    ...config,\n    current_price: current_price,\n    atr_value: atr_v,\n    atr_percentage: atr_p,\n    rsi_value: rsi_v,\n    signal_blocked: blocked,\n    reason_code4: msg\n}}];"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2000,
+                300
+            ],
+            "id": "atr-rsi-v28",
+            "name": "Code/Function (ATR/RSI Filter)"
+        },
+        {
+            "parameters": {
+                "url": "=http://172.17.0.1:3001/fng",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                2200,
+                300
+            ],
+            "id": "fng-v28",
+            "name": "F&G Index"
+        },
+        {
+            "parameters": {
+                "url": "=http://172.17.0.1:3001/news?query={{ $('Config').first().json.coin_symbol }}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                2400,
+                300
+            ],
+            "id": "news-v28",
+            "name": "News/Sentiment"
+        },
+        {
+            "parameters": {
+                "url": "=http://172.17.0.1:3001/macro",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                2600,
+                300
+            ],
+            "id": "macro-v28",
+            "name": "Macro Calendar"
+        },
+        {
+            "parameters": {
+                "url": "=http://172.17.0.1:3001/market-context",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                2800,
+                300
+            ],
+            "id": "market-context-v28",
+            "name": "Market Context"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "=http://172.17.0.1:3001/analyze",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"pair\": \"{{ $('Config').first().json.pair }}\",\n  \"source\": \"{{ $('Config').first().json.source || 'LIVE' }}\",\n  \"trend\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.trend_direction }}\",\n  \"rsi\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.rsi_value }}\",\n  \"technical_status\": \"{{ $('Code/Function (ATR/RSI Filter)').first().json.technical_status }}\",\n  \"fng_value\": \"{{ $('F&G Index').first().json.data[0].value }}\",\n  \"fng_label\": \"{{ $('F&G Index').first().json.data[0].value_classification }}\",\n  \"news_xml\": {{ JSON.stringify($('News/Sentiment').first().json.data) }},\n  \"macro_events\": {{ JSON.stringify($('Macro Calendar').first().json.data) }},\n  \"market_context\": {{ JSON.stringify($('Market Context').first().json) }},\n  \"api_key\": \"AIzaSyCWeqnZPpLHVqAmkelMYN0rm6TQOAHtTfw\"\n}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                3000,
+                300
+            ],
+            "id": "ai-analyze-v28",
+            "name": "HTTP Request"
+        },
+        {
+            "parameters": {
+                "jsCode": "// UNIVERSAL PARSER V28\nconst aiResponse = items[0].json;\nconst livePrice = parseFloat($items(\"Code/Function (ATR/RSI Filter)\")[0].json.current_price || 0);\nconst signal = aiResponse.signal || \"WAIT\";\nconst conf = aiResponse.confidence || aiResponse.confidence_score || 0;\n\nreturn {\n    json: {\n        ...aiResponse,\n        final_signal: signal,\n        current_price: livePrice,\n        confidence_score: conf\n    }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                3200,
+                300
+            ],
+            "id": "parser-v28",
+            "name": "Parser"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict",
+                        "version": 2
+                    },
+                    "conditions": [
+                        {
+                            "id": "confidence-check-v28",
+                            "leftValue": "={{ $json.confidence_score }}",
+                            "rightValue": "={{ $('Config').first().json.confidence_threshold }}",
+                            "operator": {
+                                "type": "number",
+                                "operation": "gt"
+                            }
+                        },
+                        {
+                            "id": "signal-check-v28",
+                            "leftValue": "={{ $json.final_signal }}",
+                            "rightValue": "BUY|SELL",
+                            "operator": {
+                                "type": "string",
+                                "operation": "regex"
+                            }
+                        },
+                        {
+                            "id": "rsi-safety-guard-v28",
+                            "leftValue": "={{ ($('Code/Function (ATR/RSI Filter)').first().json.rsi_value < 25 && $json.final_signal === 'SELL') || ($('Code/Function (ATR/RSI Filter)').first().json.rsi_value > 75 && $json.final_signal === 'BUY') }}",
+                            "rightValue": false,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                3400,
+                300
+            ],
+            "id": "risk-filter-v28",
+            "name": "Risk Filter"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "=http://172.17.0.1:3001/execute-order",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"pair\": \"{{ $('Config').first().json.pair }}\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.3,
+            "position": [
+                3600,
+                300
+            ],
+            "id": "execute-order-v28",
+            "name": "Execute Order (Oracle API)"
+        },
+        {
+            "parameters": {
+                "chatId": "-5238546812",
+                "text": "={{$json.message}}",
+                "additionalFields": {
+                    "parse_mode": "HTML"
+                }
+            },
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1.2,
+            "position": [
+                3800,
+                300
+            ],
+            "id": "telegram-v28",
+            "name": "Telegram (Report)",
+            "credentials": {
+                "telegramApi": {
+                    "id": "2HnE4TLrYpz4Yd6o",
+                    "name": "Telegram account"
+                }
+            }
+        }
+    ],
+    "pinData": {},
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Config",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Config": {
+            "main": [
+                [
+                    {
+                        "node": "Historical Candles",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Historical Candles": {
+            "main": [
+                [
+                    {
+                        "node": "Current_Price",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Current_Price": {
+            "main": [
+                [
+                    {
+                        "node": "Code/Function (ATR/RSI Filter)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code/Function (ATR/RSI Filter)": {
+            "main": [
+                [
+                    {
+                        "node": "F&G Index",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "F&G Index": {
+            "main": [
+                [
+                    {
+                        "node": "News/Sentiment",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "News/Sentiment": {
+            "main": [
+                [
+                    {
+                        "node": "Macro Calendar",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Macro Calendar": {
+            "main": [
+                [
+                    {
+                        "node": "Market Context",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Market Context": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP Request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP Request": {
+            "main": [
+                [
+                    {
+                        "node": "Parser",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parser": {
+            "main": [
+                [
+                    {
+                        "node": "Risk Filter",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Risk Filter": {
+            "main": [
+                [
+                    {
+                        "node": "Execute Order (Oracle API)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Execute Order (Oracle API)": {
+            "main": [
+                [
+                    {
+                        "node": "Telegram (Report)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": true,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "versionId": "v28-master-dynamic",
+    "meta": {
+        "templateCredsSetupCompleted": true
+    },
+    "tags": []
+}
