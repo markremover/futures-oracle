@@ -1380,15 +1380,21 @@ function startServer() {
             return;
         }
 
-        // 5.5. NEWS RSS PROXY (V27 - COIN-SPECIFIC FILTERING)
+        // 5.5. NEWS RSS PROXY (V27.2 - DEBUGGING & FIX)
         if (parsedUrl.pathname === '/news') {
             try {
+                // Generate unique request ID for logs
+                const reqId = Date.now().toString().slice(-4);
                 const queryParam = parsedUrl.query?.query || 'cryptocurrency';
                 const query = Array.isArray(queryParam) ? queryParam[0] : queryParam;
-                const coinName = query.toUpperCase().replace('-USD', '').replace('-PERP', '');
-                console.log(`[NEWS PROXY] Fetching and filtering news for: ${coinName}...`);
 
-                // Map coin symbols to search terms (including common names)
+                // Normalization
+                let coinName = (query || 'cryptocurrency').toUpperCase();
+                coinName = coinName.replace('-USD', '').replace('-PERP', '');
+
+                console.log(`[NEWS_${reqId}] Processing request for: '${coinName}' (Raw: ${queryParam})`);
+
+                // Map coin symbols to search terms
                 const coinSynonyms: { [key: string]: string[] } = {
                     'ETH': ['ETH', 'ETHEREUM', 'ETHER'],
                     'BTC': ['BTC', 'BITCOIN'],
@@ -1402,44 +1408,45 @@ function startServer() {
                 };
 
                 const searchTerms = coinSynonyms[coinName] || [coinName];
+                console.log(`[NEWS_${reqId}] Search terms: ${JSON.stringify(searchTerms)}`);
 
-                // Fetch generic RSS from CoinTelegraph
+                // Fetch generic RSS
                 const RSS_URL = 'https://cointelegraph.com/rss';
                 const response = await axios.get(RSS_URL, { timeout: 5000 });
-
-                // Parse and filter RSS items by coin name
                 const rssData = response.data;
-                const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
+                const totalItems = (rssData.match(/<item>/g) || []).length;
+                console.log(`[NEWS_${reqId}] Fetched ${totalItems} items from Source`);
 
+                // Filter
+                const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
                 const filteredItems = itemMatches.filter((item: string) => {
                     const title = item.match(/<title>(.*?)<\/title>/)?.[1] || '';
                     const description = item.match(/<description>(.*?)<\/description>/)?.[1] || '';
                     const combined = (title + ' ' + description).toUpperCase();
 
-                    // Match any search term
-                    return searchTerms.some(term => combined.includes(term));
+                    const isMatch = searchTerms.some(term => combined.includes(term));
+                    // console.log(`[Item Check] ${title.substring(0, 20)}... Match: ${isMatch}`);
+                    return isMatch;
                 });
 
-                // Limit to top 5 relevant items
+                console.log(`[NEWS_${reqId}] Filtered down to ${filteredItems.length} items`);
+
                 const limitedItems = filteredItems.slice(0, 5);
 
-                // If no items found, return empty but valid RSS
-                if (limitedItems.length === 0) {
-                    console.log(`[WARNING] No news items found for ${coinName}, returning empty feed`);
-                }
-
-                // Rebuild filtered RSS feed
+                // Rebuild RSS
                 const rssHeader = rssData.substring(0, rssData.indexOf('<item>') !== -1 ? rssData.indexOf('<item>') : rssData.indexOf('</channel>'));
                 const rssFooter = '</channel>\n</rss>\n';
-                const filteredRSS = rssHeader + limitedItems.join('') + rssFooter;
 
-                res.writeHead(200, { 'Content-Type': 'application/xml' });
+                // Inject debug info into XML comment
+                const debugComment = `<!-- Oracle V27.2 News Filter: ${coinName} (${limitedItems.length}/${totalItems}) -->\n`;
+                const filteredRSS = rssHeader + debugComment + limitedItems.join('') + rssFooter;
+
+                res.writeHead(200, { 'Content-Type': 'application/xml', 'X-Oracle-Version': 'V27.2' });
                 res.end(filteredRSS);
-                console.log(`[SUCCESS] Served ${limitedItems.length} filtered RSS items for ${coinName}`);
             } catch (error: any) {
-                console.error(`[ERROR] RSS Fetch/Filter failed:`, error.message);
+                console.error(`[NEWS_ERROR]`, error.message);
                 res.writeHead(502);
-                res.end(JSON.stringify({ error: 'RSS Proxy Error', details: error.message }));
+                res.end(JSON.stringify({ error: 'News Error', details: error.message }));
             }
             return;
         }
