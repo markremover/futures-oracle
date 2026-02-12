@@ -1320,7 +1320,7 @@ function startServer() {
                 const response = await axios.get('https://api.alternative.me/fng/?limit=1', { timeout: 5000 });
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(response.data));
-                console.log(`[SUCCESS] Served F&G Index`);
+                // console.log(`[SUCCESS] Served F&G Index`);
             } catch (error: any) {
                 console.error(`[ERROR] F&G Fetch failed:`, error.message);
                 res.writeHead(502);
@@ -1362,7 +1362,7 @@ function startServer() {
 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ source: 'live', data: highImpact }));
-                console.log(`[MACRO] Served ${highImpact.length} events`);
+                // console.log(`[MACRO] Served ${highImpact.length} events`);
             } catch (error: any) {
                 console.error(`[ERROR] Macro Fetch failed:`, error.message);
                 res.writeHead(502);
@@ -1383,7 +1383,7 @@ function startServer() {
                 let coinName = (query || 'cryptocurrency').toUpperCase();
                 coinName = coinName.replace('-USD', '').replace('-PERP', '');
 
-                console.log(`[NEWS_${reqId}] Processing request for: '${coinName}' (Raw: ${queryParam})`);
+                // console.log(`[NEWS_${reqId}] Processing request for: '${coinName}' (Raw: ${queryParam})`);
 
                 // Map coin symbols to search terms
                 const coinSynonyms: { [key: string]: string[] } = {
@@ -1399,14 +1399,14 @@ function startServer() {
                 };
 
                 const searchTerms = coinSynonyms[coinName] || [coinName];
-                console.log(`[NEWS_${reqId}] Search terms: ${JSON.stringify(searchTerms)}`);
+                // console.log(`[NEWS_${reqId}] Search terms: ${JSON.stringify(searchTerms)}`);
 
                 // Fetch generic RSS
                 const RSS_URL = 'https://cointelegraph.com/rss';
                 const response = await axios.get(RSS_URL, { timeout: 5000 });
                 const rssData = response.data;
                 const totalItems = (rssData.match(/<item>/g) || []).length;
-                console.log(`[NEWS_${reqId}] Fetched ${totalItems} items from Source`);
+                // console.log(`[NEWS_${reqId}] Fetched ${totalItems} items from Source`);
 
                 // Filter
                 const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
@@ -1420,7 +1420,7 @@ function startServer() {
                     return isMatch;
                 });
 
-                console.log(`[NEWS_${reqId}] Filtered down to ${filteredItems.length} items`);
+                // console.log(`[NEWS_${reqId}] Filtered down to ${filteredItems.length} items`);
 
                 const limitedItems = filteredItems.slice(0, 5);
 
@@ -1509,7 +1509,7 @@ function startServer() {
 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ source: 'live_finnhub', ...stockCache }));
-                console.log(`[STOCKS] Served Context: ${sentiment}`);
+                // console.log(`[STOCKS] Served Context: ${sentiment}`);
             } catch (error: any) {
                 console.error(`[ERROR] Stock Fetch failed:`, error.message);
 
@@ -1563,7 +1563,7 @@ function startServer() {
                     }
 
 
-                    console.log(`[AI] Analyzing Market Data for ${data.pair || 'Crypto'}...`);
+                    // console.log(`[AI] Analyzing Market Data for ${data.pair || 'Crypto'}...`);
 
                     const prompt = `
 You are a crypto trading expert. Analyze this data and provide a signal (BUY, SELL, or HOLD).
@@ -1616,7 +1616,7 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
 
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
-                    console.log(`[AI] Analysis Served: ${JSON.stringify(result).substring(0, 50)}...`);
+                    // console.log(`[AI] Analysis Served: ${JSON.stringify(result).substring(0, 50)}...`);
 
                 } catch (error: any) {
                     console.error(`[ERROR] AI Analysis Failed:`, error.message);
