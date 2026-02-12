@@ -17,7 +17,7 @@
             },
             {
               "name": "pair",
-              "value": "ETH-PERP"
+              "value": "={{ $('Webhook').first().json.pair }}"
             }
           ]
         },
@@ -40,7 +40,7 @@
           "parameters": [
             {
               "name": "pair",
-              "value": "ETH-PERP"
+              "value": "={{ $('Webhook').first().json.pair }}"
             }
           ]
         },
@@ -145,6 +145,15 @@
                 "type": "string",
                 "operation": "regex"
               }
+            },
+            {
+              "id": "rsi-safety-guard-v25",
+              "leftValue": "={{ ($('Code/Function (ATR/RSI Filter)').first().json.rsi_value < 25 && $json.final_signal === 'SELL') || ($('Code/Function (ATR/RSI Filter)').first().json.rsi_value > 75 && $json.final_signal === 'BUY') }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -248,7 +257,7 @@
         "url": "http://172.17.0.1:3001/execute-order",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"pair\": \"ETH-USD\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
+        "jsonBody": "={\n  \"pair\": \"{{ $('Webhook').first().json.pair }}\",\n  \"signal\": \"{{ $json.final_signal }}\",\n  \"confidence\": \"{{ $json.confidence || 'N/A' }}\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
