@@ -81,7 +81,7 @@ const MAX_TRADES_PER_COIN_24H = 2;
 let virtualPositions: ActivePosition[] = []; // Separate tracking for sim mode
 let totalVirtualPnl = 0; // Track cumulative virtual profit/loss
 
-// --- ATR CALCULATION HELPERS (V29) ---
+// --- ATR CALCULATION HELPERS (V29.1 - Enhanced Debug) ---
 async function fetchCandlesForATR(pair: string, count: number): Promise<any[] | null> {
     try {
         // Convert pair format: ETH-PERP -> ETH-USD for Coinbase
@@ -89,13 +89,32 @@ async function fetchCandlesForATR(pair: string, count: number): Promise<any[] | 
 
         // Fetch candles from Coinbase REST API (5-minute candles)
         const url = `https://api.exchange.coinbase.com/products/${cbPair}/candles?granularity=300`;
+        console.log(`[CANDLE FETCH] Requesting: ${url}`);
+
         const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Oracle/V29' },
-            timeout: 5000
+            headers: {
+                'User-Agent': 'Oracle/V29.1',
+                'Accept': 'application/json'
+            },
+            timeout: 10000,
+            validateStatus: (status) => status < 500 // Don't throw on 4xx
         });
 
-        if (!response.data || response.data.length < count) {
-            console.error(`[CANDLE FETCH] Insufficient data for ${pair}: got ${response.data?.length || 0}, need ${count}`);
+        console.log(`[CANDLE FETCH] Response status: ${response.status}`);
+
+        if (response.status !== 200) {
+            console.error(`[CANDLE FETCH] HTTP ${response.status} for ${pair}`);
+            console.error(`[CANDLE FETCH] Response:`, JSON.stringify(response.data).substring(0, 200));
+            return null;
+        }
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.error(`[CANDLE FETCH] Invalid response format for ${pair}`);
+            return null;
+        }
+
+        if (response.data.length < count) {
+            console.error(`[CANDLE FETCH] Insufficient data for ${pair}: got ${response.data.length}, need ${count}`);
             return null;
         }
 
@@ -107,10 +126,14 @@ async function fetchCandlesForATR(pair: string, count: number): Promise<any[] | 
             close: parseFloat(c[4])
         }));
 
-        console.log(`[CANDLE FETCH] ${pair}: fetched ${candles.length} candles`);
+        console.log(`[CANDLE FETCH] ✅ ${pair}: fetched ${candles.length} candles`);
         return candles;
     } catch (error: any) {
         console.error(`[CANDLE FETCH ERROR] ${pair}:`, error.message);
+        if (error.response) {
+            console.error(`[CANDLE FETCH ERROR] Status: ${error.response.status}`);
+            console.error(`[CANDLE FETCH ERROR] Data:`, JSON.stringify(error.response.data).substring(0, 200));
+        }
         return null;
     }
 }
