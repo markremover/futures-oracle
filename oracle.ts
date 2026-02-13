@@ -266,14 +266,16 @@ class PriceMonitor {
 
         console.log(`🚀 [ORDER SENT] ${pair} ${side} | x${leverage.toFixed(1)} | SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(0)}) | TP: ${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(0)})`);
 
-        // --- V22 REPORTING: OPEN ---
-        const symbol = pair.split('-')[0].toLowerCase();
-        const url = `${N8N_WEBHOOK_BASE}${symbol}`;
+        // --- V28 REPORTING: MASTER WORKFLOW INTEGRATION ---
+        // Convert ETH-USD to ETH-PERP format for Master Workflow
+        const perpPair = pair.replace('-USD', '-PERP');
+        const url = 'http://172.17.0.1:5678/webhook/futurec-master';
 
         try {
             await axios.post(url, {
                 type: 'ORACLE_OPEN',
-                pair,
+                pair: perpPair,  // ETH-PERP format for Master Workflow
+                source: 'ORACLE_IMPULSE',  // Mark as autonomous trigger
                 side,
                 entry_price: price,
                 leverage: leverage.toFixed(1),
@@ -282,7 +284,7 @@ class PriceMonitor {
                 sl_price: slPrice,
                 risk: riskPerTrade,
                 timestamp: now,
-                message: `🚀 [ORDER SENT] ${pair}\nType: ${side} ${emoji}\nEntry: $${price}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(2)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(2)})`
+                message: `🚀 [ORACLE IMPULSE] ${perpPair}\nType: ${side} ${emoji}\nEntry: $${price}\nMargin: $${margin.toFixed(2)} (x${leverage.toFixed(1)})\n🛑 SL: $${slPrice.toFixed(2)} (-$${slPnl.toFixed(2)})\n🎯 TP: $${tpPrice.toFixed(2)} (+$${tpPnl.toFixed(2)})`
             });
         } catch (e: any) {
             console.error(`❌ [WEBHOOK FAILED]`, e.message);
