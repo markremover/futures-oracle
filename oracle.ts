@@ -81,6 +81,65 @@ const MAX_TRADES_PER_COIN_24H = 2;
 let virtualPositions: ActivePosition[] = []; // Separate tracking for sim mode
 let totalVirtualPnl = 0; // Track cumulative virtual profit/loss
 
+// --- ATR CALCULATION HELPERS (V29) ---
+async function fetchCandlesForATR(pair: string, count: number): Promise<any[] | null> {
+    try {
+        // Convert pair format: ETH-PERP -> ETH-USD for Coinbase
+        const cbPair = pair.replace('-PERP', '-USD');
+
+        // Fetch candles from Coinbase REST API (5-minute candles)
+        const url = `https://api.exchange.coinbase.com/products/${cbPair}/candles?granularity=300`;
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'Oracle/V29' },
+            timeout: 5000
+        });
+
+        if (!response.data || response.data.length < count) {
+            console.error(`[CANDLE FETCH] Insufficient data for ${pair}: got ${response.data?.length || 0}, need ${count}`);
+            return null;
+        }
+
+        // Coinbase returns: [timestamp, low, high, open, close, volume]
+        // Convert to {high, low, close} format
+        const candles = response.data.slice(0, count).map((c: any) => ({
+            high: parseFloat(c[2]),
+            low: parseFloat(c[1]),
+            close: parseFloat(c[4])
+        }));
+
+        console.log(`[CANDLE FETCH] ${pair}: fetched ${candles.length} candles`);
+        return candles;
+    } catch (error: any) {
+        console.error(`[CANDLE FETCH ERROR] ${pair}:`, error.message);
+        return null;
+    }
+}
+
+function calculateATR(candles: any[], period: number): number {
+    if (!candles || candles.length < period + 1) {
+        console.error(`[ATR CALC] Insufficient candles: ${candles?.length || 0} < ${period + 1}`);
+        return 0;
+    }
+
+    let trSum = 0;
+    for (let i = 1; i < period + 1; i++) {
+        const high = candles[i].high;
+        const low = candles[i].low;
+        const prevClose = candles[i - 1].close;
+
+        const tr = Math.max(
+            high - low,
+            Math.abs(high - prevClose),
+            Math.abs(low - prevClose)
+        );
+        trSum += tr;
+    }
+
+    const atr = trSum / period;
+    console.log(`[ATR CALC] ATR-${period} = ${atr.toFixed(4)}`);
+    return atr;
+}
+
 // --- PRICE MONITOR (AUTONOMOUS AGENT) ---
 class PriceMonitor {
     private history: Map<string, { time: number, price: number }[]> = new Map();
@@ -1706,133 +1765,134 @@ Market Context (Stocks/TradFi): ${JSON.stringify(data.market_context || 'None')}
         res.end(JSON.stringify({ error: 'Endpoint not found' }));
     });
 
-    server.listen(PORT, '0.0.0.0', () => {
-        const modeTag = SIMULATION_MODE ? '🎮 [SIMULATION]' : '💵 [LIVE]';
-        console.log(`✅ [FUTURES ORACLE] ${modeTag} Captain's Log active on port ${PORT}`);
-        console.log(`🌐 [SERVER] Listening on 0.0.0.0:${PORT} - accessible from all interfaces`);
-        console.log(`🎯 Oracle watching markets - Ready for signals`);
-    });
-}
+    async function startServer(): Promise<void> {
+        return new Promise((resolve) => {
+            server.listen(PORT, '0.0.0.0', () => {
+                console.log(`✅ [FUTURES ORACLE] 🚀 [SIMULATION] Captain's log active on port ${PORT}`);
+                console.log(`📡 [SERVER] Listening on 0.0.0.0:${PORT} - accessible from all interfaces`);
+                console.log(`🔮 Oracle watching markets - Ready for signals`);
+                resolve();
+            });
+        });
+    }
 
+    // --- WEBSOCKET ---
+    function connectWs() {
+        console.log(`[CONNECT] Connecting to ${WS_URL}...`);
+        const ws = new WebSocket(WS_URL);
 
+        ws.on('open', () => {
+            console.log('[CONNECTED] Validating connection...');
+            wsConnected = true;
+            const subscribeMsg = {
+                "type": "subscribe",
+                "channel": "ticker",
+                "product_ids": TARGET_PAIRS
+            };
+            ws.send(JSON.stringify(subscribeMsg));
+            console.log(`[SUBSCRIBE] Sent subscription for: ${TARGET_PAIRS.join(', ')}`);
+        });
 
-// --- WEBSOCKET ---
-function connectWs() {
-    console.log(`[CONNECT] Connecting to ${WS_URL}...`);
-    const ws = new WebSocket(WS_URL);
+        ws.on('message', (data: any) => {
+            wsConnected = true;
+            lastWsUpdate = Date.now();
+            try {
+                const msg = JSON.parse(data.toString());
 
-    ws.on('open', () => {
-        console.log('[CONNECTED] Validating connection...');
-        wsConnected = true;
-        const subscribeMsg = {
-            "type": "subscribe",
-            "channel": "ticker",
-            "product_ids": TARGET_PAIRS
-        };
-        ws.send(JSON.stringify(subscribeMsg));
-        console.log(`[SUBSCRIBE] Sent subscription for: ${TARGET_PAIRS.join(', ')}`);
-    });
+                // DEBUG REMOVED: Clean logs requested
+                // console.log(`[WS DEBUG] Message type: ${msg.type || msg.channel}, keys: ${Object.keys(msg).join(', ')}`);
 
-    ws.on('message', (data: any) => {
-        wsConnected = true;
-        lastWsUpdate = Date.now();
-        try {
-            const msg = JSON.parse(data.toString());
-
-            // DEBUG REMOVED: Clean logs requested
-            // console.log(`[WS DEBUG] Message type: ${msg.type || msg.channel}, keys: ${Object.keys(msg).join(', ')}`);
-
-            if (msg.channel === 'ticker' && msg.events) {
-                for (const event of msg.events) {
-                    if (event.type === 'update' || event.type === 'snapshot') {
-                        for (const ticker of event.tickers) {
-                            const price = parseFloat(ticker.price);
-                            prices.set(ticker.product_id, price);
-                            // FEED AUTONOMOUS AGENT
-                            monitor.update(ticker.product_id, price);
+                if (msg.channel === 'ticker' && msg.events) {
+                    for (const event of msg.events) {
+                        if (event.type === 'update' || event.type === 'snapshot') {
+                            for (const ticker of event.tickers) {
+                                const price = parseFloat(ticker.price);
+                                prices.set(ticker.product_id, price);
+                                // FEED AUTONOMOUS AGENT
+                                monitor.update(ticker.product_id, price);
+                            }
                         }
                     }
                 }
-            }
-        } catch (e) { }
-    });
-
-    // Heartbeat to keep connection alive
-    const pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.ping();
-        }
-    }, 30000);
-
-    ws.on('close', () => {
-        clearInterval(pingInterval);
-        console.log('⚠️ [WS] Disconnected. Reconnecting in 5s...');
-        wsConnected = false;
-        setTimeout(connectWs, 5000);
-    });
-
-    ws.on('error', (e) => console.error(`❌ [WS ERROR] ${e.message}`));
-}
-
-// --- SMART REPORTER ---
-async function sendSystemReport(status: "STARTUP" | "ERROR", msg: string) {
-    const url = `${N8N_WEBHOOK_BASE}system`;
-    try {
-        await axios.post(url, {
-            type: "SYSTEM_REPORT",
-            level: status === "ERROR" ? "CRITICAL" : "INFO",
-            message: msg,
-            timestamp: Date.now()
+            } catch (e) { }
         });
-        console.log(`✅ [REPORT SENT] ${msg}`);
-    } catch (e: any) {
-        if (e.response && e.response.status === 404) {
-            console.log(`🔸 [REPORTING DISABLED] Create 'futurec-trigger-system' in N8N to receive Telegram alerts.`);
-        } else {
-            console.error(`⚠️ [REPORT FAILED] Connection error: ${e.message}`);
+
+        // Heartbeat to keep connection alive
+        const pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.ping();
+            }
+        }, 30000);
+
+        ws.on('close', () => {
+            clearInterval(pingInterval);
+            console.log('⚠️ [WS] Disconnected. Reconnecting in 5s...');
+            wsConnected = false;
+            setTimeout(connectWs, 5000);
+        });
+
+        ws.on('error', (e) => console.error(`❌ [WS ERROR] ${e.message}`));
+    }
+
+    // --- SMART REPORTER ---
+    async function sendSystemReport(status: "STARTUP" | "ERROR", msg: string) {
+        const url = `${N8N_WEBHOOK_BASE}system`;
+        try {
+            await axios.post(url, {
+                type: "SYSTEM_REPORT",
+                level: status === "ERROR" ? "CRITICAL" : "INFO",
+                message: msg,
+                timestamp: Date.now()
+            });
+            console.log(`✅ [REPORT SENT] ${msg}`);
+        } catch (e: any) {
+            if (e.response && e.response.status === 404) {
+                console.log(`🔸 [REPORTING DISABLED] Create 'futurec-trigger-system' in N8N to receive Telegram alerts.`);
+            } else {
+                console.error(`⚠️ [REPORT FAILED] Connection error: ${e.message}`);
+            }
         }
     }
-}
 
-// --- SELF-DIAGNOSTIC (STARTUP CHECK) ---
-function runStartupCheck() {
-    console.log("⏳ [SYSTEM] Waiting 10s for warm-up...");
-    setTimeout(async () => {
-        const isHealthy = wsConnected && prices.size > 0;
-        const tracked = Array.from(prices.keys()).length;
+    // --- SELF-DIAGNOSTIC (STARTUP CHECK) ---
+    function runStartupCheck() {
+        console.log("⏳ [SYSTEM] Waiting 10s for warm-up...");
+        setTimeout(async () => {
+            const isHealthy = wsConnected && prices.size > 0;
+            const tracked = Array.from(prices.keys()).length;
 
-        console.log(`🔍 [DIAGNOSTIC] Connected: ${wsConnected}, Pairs: ${tracked}, Finnhub: Ready`);
+            console.log(`🔍 [DIAGNOSTIC] Connected: ${wsConnected}, Pairs: ${tracked}, Finnhub: Ready`);
 
-        if (isHealthy) {
-            sendSystemReport("STARTUP", `🟢 Futures Oracle Online. Tracking ${tracked} pairs.`);
-        } else {
-            console.error(`🔴 [DIAGNOSTIC FAILED] Oracle is NOT healthy.`);
-            sendSystemReport("ERROR", "🔴 Oracle Startup FAILED. Check server logs!");
-        }
-    }, 10000);
-}
+            if (isHealthy) {
+                sendSystemReport("STARTUP", `🟢 Futures Oracle Online. Tracking ${tracked} pairs.`);
+            } else {
+                console.error(`🔴 [DIAGNOSTIC FAILED] Oracle is NOT healthy.`);
+                sendSystemReport("ERROR", "🔴 Oracle Startup FAILED. Check server logs!");
+            }
+        }, 10000);
+    }
 
-// --- MARKET PULSE (VISIBILITY LOOP) ---
+    // --- MARKET PULSE (VISIBILITY LOOP) ---
 
-function logMarketPulse() {
-    if (!wsConnected || prices.size === 0) return;
+    function logMarketPulse() {
+        if (!wsConnected || prices.size === 0) return;
 
-    // Header removed to fit all 5 pairs in dashboard (tail -5)
-    // console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
+        // Header removed to fit all 5 pairs in dashboard (tail -5)
+        // console.log(`\n💓 [ORACLE PULSE] Tracking ${prices.size} Pairs | Stock Sentiment: ${stockCache?.sentiment || 'NEUTRAL'}`);
 
-    TARGET_PAIRS.forEach(pair => {
-        const currentPrice = prices.get(pair) || 0;
-        monitor.logPairStatus(pair, currentPrice);
-    });
-    // console.log('--------------------------------------------------');
-}
+        TARGET_PAIRS.forEach(pair => {
+            const currentPrice = prices.get(pair) || 0;
+            monitor.logPairStatus(pair, currentPrice);
+        });
+        // console.log('--------------------------------------------------');
+    }
 
-// Start pulse after 15 seconds (give time to accumulate data)
-setTimeout(logMarketPulse, 15000);
-// Then pulse every 30 seconds
-setInterval(logMarketPulse, 30000);
+    // Start pulse after 15 seconds (give time to accumulate data)
+    setTimeout(logMarketPulse, 15000);
+    // Then pulse every 30 seconds
+    setInterval(logMarketPulse, 30000);
 
-// --- MAIN ---
-startServer();
-connectWs();
-runStartupCheck();
+    // --- MAIN ---
+    startServer();
+    connectWs();
+    runStartupCheck();
