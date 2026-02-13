@@ -24,8 +24,15 @@ echo ""
 
 # 2. CHECK FUTURES ORACLE
 echo -e "${YELLOW}[ Checking Futures Oracle... ]${NC}"
+
+# Auto-detect version from package.json
+ORACLE_VERSION="Unknown"
+if [ -f "/home/karmez1988/futures-oracle/package.json" ]; then
+    ORACLE_VERSION=$(grep '"version"' /home/karmez1988/futures-oracle/package.json | head -1 | sed 's/.*: "\(.*\)".*/\1/')
+fi
+
 if docker ps | grep -q "futures-oracle"; then
-    echo -e "${GREEN}✅ ACTIVE${NC} (Container: futures-oracle)"
+    echo -e "${GREEN}✅ ACTIVE${NC} (Container: futures-oracle | Version: ${BLUE}V${ORACLE_VERSION}${NC})"
     echo -e "   Status: $(docker ps --filter "name=futures-oracle" --format "{{.Status}}")"
     
     # Smart Health Check (Broader Search)

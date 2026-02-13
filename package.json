@@ -1,6 +1,6 @@
 {
     "name": "futures-oracle",
-    "version": "1.0.0",
+    "version": "29.0.0",
     "description": "Lightweight Futures Price Feed",
     "main": "oracle.ts",
     "scripts": {
