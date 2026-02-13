@@ -1373,10 +1373,9 @@ function startServer() {
             return;
         }
 
-        // 5.5. NEWS RSS PROXY (V27.2 - DEBUGGING & FIX)
+        // 5.5. NEWS RSS PROXY (V29.0 - ENHANCED FILTERING)
         if (parsedUrl.pathname === '/news') {
             try {
-                // Generate unique request ID for logs
                 const reqId = Date.now().toString().slice(-4);
                 const queryParam = parsedUrl.query?.query || 'cryptocurrency';
                 const query = Array.isArray(queryParam) ? queryParam[0] : queryParam;
@@ -1385,11 +1384,11 @@ function startServer() {
                 let coinName = (query || 'cryptocurrency').toUpperCase();
                 coinName = coinName.replace('-USD', '').replace('-PERP', '');
 
-                // console.log(`[NEWS_${reqId}] Processing request for: '${coinName}' (Raw: ${queryParam})`);
+                console.log(`[NEWS_${reqId}] 🔍 Request for: '${coinName}' (Raw query: ${queryParam})`);
 
-                // Map coin symbols to search terms
+                // V29: Enhanced coin synonyms
                 const coinSynonyms: { [key: string]: string[] } = {
-                    'ETH': ['ETH', 'ETHEREUM', 'ETHER'],
+                    'ETH': ['ETH', 'ETHEREUM', 'ETHER', 'VITALIK'],
                     'BTC': ['BTC', 'BITCOIN'],
                     'SOL': ['SOL', 'SOLANA'],
                     'XRP': ['XRP', 'RIPPLE'],
@@ -1401,28 +1400,42 @@ function startServer() {
                 };
 
                 const searchTerms = coinSynonyms[coinName] || [coinName];
-                // console.log(`[NEWS_${reqId}] Search terms: ${JSON.stringify(searchTerms)}`);
+                console.log(`[NEWS_${reqId}] 📌 Search terms: ${JSON.stringify(searchTerms)}`);
 
-                // Fetch generic RSS
+                // Fetch RSS
                 const RSS_URL = 'https://cointelegraph.com/rss';
                 const response = await axios.get(RSS_URL, { timeout: 5000 });
                 const rssData = response.data;
                 const totalItems = (rssData.match(/<item>/g) || []).length;
-                // console.log(`[NEWS_${reqId}] Fetched ${totalItems} items from Source`);
+                console.log(`[NEWS_${reqId}] 📰 Fetched ${totalItems} total items from Cointelegraph`);
 
-                // Filter
+                // V29: Stricter filtering with CDATA handling
                 const itemMatches = rssData.match(/<item>(.*?)<\/item>/gs) || [];
                 const filteredItems = itemMatches.filter((item: string) => {
-                    const title = item.match(/<title>(.*?)<\/title>/)?.[1] || '';
-                    const description = item.match(/<description>(.*?)<\/description>/)?.[1] || '';
-                    const combined = (title + ' ' + description).toUpperCase();
+                    // Extract title (handle CDATA)
+                    let title = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1]
+                        || item.match(/<title>(.*?)<\/title>/)?.[1]
+                        || '';
 
+                    // Extract description (handle CDATA)
+                    let description = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/)?.[1]
+                        || item.match(/<description>(.*?)<\/description>/)?.[1]
+                        || '';
+
+                    // Strip HTML tags from description
+                    description = description.replace(/<[^>]*>/g, '');
+
+                    const combined = (title + ' ' + description).toUpperCase();
                     const isMatch = searchTerms.some(term => combined.includes(term));
-                    // console.log(`[Item Check] ${title.substring(0, 20)}... Match: ${isMatch}`);
+
+                    if (isMatch) {
+                        console.log(`[NEWS_${reqId}] ✅ MATCH: "${title.substring(0, 60)}..."`);
+                    }
+
                     return isMatch;
                 });
 
-                // console.log(`[NEWS_${reqId}] Filtered down to ${filteredItems.length} items`);
+                console.log(`[NEWS_${reqId}] ✂️ Filtered: ${filteredItems.length}/${totalItems} items match '${coinName}'`);
 
                 const limitedItems = filteredItems.slice(0, 5);
 
@@ -1430,11 +1443,11 @@ function startServer() {
                 const rssHeader = rssData.substring(0, rssData.indexOf('<item>') !== -1 ? rssData.indexOf('<item>') : rssData.indexOf('</channel>'));
                 const rssFooter = '</channel>\n</rss>\n';
 
-                // Inject debug info into XML comment
-                const debugComment = `<!-- Oracle V27.2 News Filter: ${coinName} (${limitedItems.length}/${totalItems}) -->\n`;
+                // V29: Enhanced debug comment
+                const debugComment = `<!-- Oracle V29.0 News Filter: ${coinName} | Matched: ${limitedItems.length}/${totalItems} | Terms: ${searchTerms.join(',')} -->\n`;
                 const filteredRSS = rssHeader + debugComment + limitedItems.join('') + rssFooter;
 
-                res.writeHead(200, { 'Content-Type': 'application/xml', 'X-Oracle-Version': 'V27.2' });
+                res.writeHead(200, { 'Content-Type': 'application/xml', 'X-Oracle-Version': 'V29.0' });
                 res.end(filteredRSS);
             } catch (error: any) {
                 console.error(`[NEWS_ERROR]`, error.message);
